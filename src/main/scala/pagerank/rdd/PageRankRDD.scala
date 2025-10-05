@@ -8,7 +8,16 @@ import pagerank.PageRankUtils
 
 object PageRankRDD {
 
-    // Implémentation d'une itération de l’algorithme PageRank
+    /**
+    * Effectue une itération du calcul PageRank :
+    * v_{i+1} = M × v_i
+    *
+    * @param v         vecteur de rangs actuel (page -> rank)
+    * @param links     graphe des liens sortants (page -> outlinks)
+    * @param allNodes  ensemble de toutes les pages
+    * @param debug     booleen pour afficher les messages de debug
+    * @param logger    logger permettant d'afficher les messages de log
+    */
     def oneStep(
         v: RDD[(String, Double)],
         links: RDD[(String, Seq[String])],
@@ -17,38 +26,46 @@ object PageRankRDD {
         logger: Logger
     ): RDD[(String, Double)] = {
 
-    val contributionsDetailed: RDD[(String, String, Double)] =
-      links.join(v) // (q, (outlinks, v(q)))
-        .flatMap { case (q, (outs, rankQ)) =>
-          if (outs.isEmpty) Seq.empty[(String, String, Double)]
-          else outs.map(dest => (dest, q, rankQ / outs.size))
+      // === (1) Distribution : chaque page "src" distribue son rang à ses destinations ===
+      val contributionsDetailed: RDD[(String, String, Double)] = links
+        .join(v) // (src, (outlinks, rankSrc))
+        .flatMap { case (src, (outs, rankSrc)) =>
+          if (outs.isEmpty)
+            Seq.empty[(String, String, Double)] // pas de liens sortants
+          else {
+            val share = rankSrc / outs.size
+            outs.map(dest => (dest, src, share)) // <-- conservation de la source
+          }
         }
 
-    if (debug) {
-      logger.debug("==== Contributions (chaque source distribue son rang) ====")
-      contributionsDetailed.collect().foreach { case (dest, src, contrib) =>
-        logger.debug(f"$src%-5s -> $dest%-5s : $contrib%.6f")
+      if (debug) {
+        logger.debug("==== Contributions détaillées (chaque source distribue son rang) ====")
+        contributionsDetailed.collect().foreach { case (dest, src, contrib) =>
+          logger.debug(f"$dest%-5s reçoit $contrib%.6f de $src")
+        }
       }
+
+      // === (2) Agrégation : chaque page "dest" reçoit la somme des contributions ===
+      val receivedRanks: RDD[(String, Double)] =
+        contributionsDetailed
+          .map { case (dest, _, contrib) => (dest, contrib) }
+          .reduceByKey(_ + _)
+
+      if (debug) {
+        logger.debug("==== Rangs reçus (somme des contributions entrantes) ====")
+        receivedRanks.collect().foreach { case (node, rank) =>
+          logger.debug(f"$node%-5s : $rank%.6f")
+        }
+      }
+
+      // === (3) Réintégration des pages sans contribution ===
+      val nextRanks = receivedRanks
+        .union(allNodes.map(n => (n, 0.0)))
+        .reduceByKey(_ + _)
+
+      nextRanks
     }
 
-    val contributions: RDD[(String, Double)] =
-      contributionsDetailed.map { case (dest, _, contrib) => (dest, contrib) }
-
-    val received: RDD[(String, Double)] = contributions.reduceByKey(_ + _)
-
-    if (debug) {
-      logger.debug("==== Rangs reçus (somme des contributions) ====")
-      received.collect().foreach { case (node, rank) =>
-        logger.debug(f"$node%-5s : $rank%.6f")
-      }
-    }
-
-    val result = received
-      .union(allNodes.map(n => (n, 0.0)))
-      .reduceByKey(_ + _)
-
-    result
-  }
 
   // Calcul complet du PageRank sur N itérations (avec option d'historique)
   def computePageRank(

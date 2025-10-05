@@ -8,58 +8,76 @@ import pagerank.PageRankUtils
 
 object PageRankDF {
 
-  /** Une itération de l’algorithme PageRank */
-  def oneStep(
-      v: DataFrame,
-      links: DataFrame,
-      allNodes: Seq[String],
-      debug: Boolean = false,
-      logger: Logger
-  )(implicit spark: SparkSession): DataFrame = {
-    import spark.implicits._
+    /**
+    * Effectue une itération du calcul PageRank :
+    * v_{i+1} = M × v_i
+    *
+    * @param v         vecteur de rangs actuel (page -> rank)
+    * @param links     graphe des liens sortants (page -> outlinks)
+    * @param allNodes  ensemble de toutes les pages
+    * @param debug     booleen pour afficher les messages de debug
+    * @param logger    logger permettant d'afficher les messages de log
+    */
+    def oneStep(
+        v: DataFrame,
+        links: DataFrame,
+        allNodes: Seq[String],
+        debug: Boolean = false,
+        logger: Logger
+    )(implicit spark: SparkSession): DataFrame = {
 
-    val outDegrees = links.groupBy($"page")
+      import spark.implicits._
+
+      // === (1) Calcul du degré sortant de chaque page ===
+      val outDegrees = links
+        .groupBy($"page")
         .agg(count($"outlink").as("degree"))
 
-    // Contributions = rank / degree
-    val contributions = links
-      .join(v, Seq("page"))
-      .join(outDegrees, Seq("page"))
-      .withColumn("contrib", $"rank" / $"degree")
-      .select($"outlink".as("dest"), $"page".as("src"), $"contrib")
+      // === (2) Distribution du rang : chaque source envoie une contribution à ses destinations ===
+      val contributionsDetailed = links
+        .join(v, Seq("page"))          // (page, outlink, rank)
+        .join(outDegrees, Seq("page")) // (page, outlink, rank, degree)
+        .withColumn("contrib", $"rank" / $"degree")
+        .select(
+          $"outlink".as("dest"),       // destination du lien
+          $"page".as("src"),           // source du lien
+          $"contrib"
+        )
 
-    if (debug) {
-      logger.debug("==== Contributions (chaque source distribue son rang) ====")
-      contributions.collect().foreach { row =>
-        val dest    = row.getAs[String]("dest")
-        val src     = row.getAs[String]("src")
-        val contrib = row.getAs[Double]("contrib")
-        logger.debug(f"$src%-5s -> $dest%-5s : $contrib%.6f")
+      if (debug) {
+        logger.debug("==== Contributions détaillées (chaque source distribue son rang) ====")
+        contributionsDetailed.collect().foreach { row =>
+          val dest    = row.getAs[String]("dest")
+          val src     = row.getAs[String]("src")
+          val contrib = row.getAs[Double]("contrib")
+          logger.debug(f"$dest%-5s reçoit $contrib%.6f de $src")
+        }
       }
-    }
 
-    val received = contributions
-      .groupBy("dest")
-      .agg(sum("contrib").as("rank"))
-      .withColumnRenamed("dest", "page")
+      // === (3) Agrégation : somme des contributions reçues par chaque page ===
+      val received = contributionsDetailed
+        .groupBy("dest")
+        .agg(sum("contrib").as("rank"))
+        .withColumnRenamed("dest", "page")
 
-    if (debug) {
-      logger.debug("==== Rangs reçus (somme des contributions) ====")
-      received.collect().foreach { row =>
-        val node = row.getAs[String]("page")
-        val rank = row.getAs[Double]("rank")
-        logger.debug(f"$node%-5s : $rank%.6f")
+      if (debug) {
+        logger.debug("==== Rangs reçus (somme des contributions entrantes) ====")
+        received.collect().foreach { row =>
+          val node = row.getAs[String]("page")
+          val rank = row.getAs[Double]("rank")
+          logger.debug(f"$node%-5s : $rank%.6f")
+        }
       }
+
+      // === (4) Réintégration des pages sans contribution ===
+      val allNodesDF = allNodes.toDF("page")
+
+      val nextRanks = allNodesDF
+        .join(received, Seq("page"), "left_outer")
+        .na.fill(0.0, Seq("rank"))
+
+      nextRanks
     }
-
-    val allNodesDF = allNodes.toDF("page")
-
-    val result = allNodesDF
-      .join(received, Seq("page"), "left_outer")
-      .na.fill(0.0, Seq("rank"))
-
-    result
-  }
 
   // Calcul complet du PageRank sur N itérations (avec option d'historique)
   def computePageRank(
