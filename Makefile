@@ -3,12 +3,14 @@ JAR=target/scala-2.12/pagerankspark_2.12-0.1.jar
 GRAPH_DIR=data
 INPUT=$(GRAPH_DIR)/sample_graph.txt
 OUTPUT_RDD=output_rdd/
+OUTPUT_RDD_OPTIMIZED=output_rdd_optimized/
 OUTPUT_DF=output_df/
 OUTPUT_BENCH=output_benchmark/
 SCRIPTS_DIR=$(PWD)/scripts
 BENCH_CSV=$(OUTPUT_BENCH)/benchmark.csv
 BENCH_PNG=$(OUTPUT_BENCH)/benchmark.png
 MAIN_RDD=pagerank.rdd.MainRDD
+MAIN_RDD_OPTIMIZED = pagerank.rddoptimized.MainRDDOptimized
 MAIN_DF=pagerank.df.MainDF
 
 ITER ?= 10       # valeur par défaut si non précisée
@@ -34,6 +36,18 @@ run-rdd: build
 ifeq ($(PLOT),true)
 	@echo "📈 Tracé du PageRank..."
 	$(SCRIPTS_DIR)/plot_history.py $(OUTPUT_RDD)/history.csv
+endif
+
+run-rdd-optimized: build
+	rm -rf $(OUTPUT_RDD_OPTIMIZED)
+	@echo "⏱️  Exécution RDD avec $(ITER) itérations"
+	/usr/bin/time -p spark-submit --master local[*] --class $(MAIN_RDD_OPTIMIZED) \
+		--conf "spark.driver.extraJavaOptions=-Dlog4j.configurationFile=$(PWD)/src/main/resources/log4j2.properties" \
+		--conf "spark.executor.extraJavaOptions=-Dlog4j.configurationFile=$(PWD)/src/main/resources/log4j2.properties" \
+		$(JAR) $(INPUT) $(OUTPUT_RDD_OPTIMIZED) $(ITER) $(if $(filter true,$(PLOT)),--plot) $(if $(filter true,$(DEBUG)),--debug)
+ifeq ($(PLOT),true)
+	@echo "📈 Tracé du PageRank..."
+	$(SCRIPTS_DIR)/plot_history.py $(OUTPUT_RDD_OPTIMIZED)/history.csv
 endif
 
 # Exécution version DataFrame avec mesure du temps
@@ -78,12 +92,18 @@ benchmark: build
 			--conf "spark.driver.extraJavaOptions=-Dlog4j.configurationFile=$(PWD)/src/main/resources/log4j2.properties" \
 			--conf "spark.executor.extraJavaOptions=-Dlog4j.configurationFile=$(PWD)/src/main/resources/log4j2.properties" \
 			$(JAR) $$graph $(OUTPUT_RDD) $(ITER) $(if $(filter true,$(PLOT)),--plot) $(if $(filter true,$(DEBUG)),--debug); \
+		/usr/bin/time -p -o time_rdd_optimized.log \
+			spark-submit --master local[*] --class $(MAIN_RDD_OPTIMIZED) \
+			--conf "spark.driver.extraJavaOptions=-Dlog4j.configurationFile=$(PWD)/src/main/resources/log4j2.properties" \
+			--conf "spark.executor.extraJavaOptions=-Dlog4j.configurationFile=$(PWD)/src/main/resources/log4j2.properties" \
+			$(JAR) $$graph $(OUTPUT_RDD_OPTIMIZED) $(ITER) $(if $(filter true,$(PLOT)),--plot) $(if $(filter true,$(DEBUG)),--debug); \
 		/usr/bin/time -p -o time_df.log \
 			spark-submit --master local[*] --class $(MAIN_DF) \
 			--conf "spark.driver.extraJavaOptions=-Dlog4j.configurationFile=$(PWD)/src/main/resources/log4j2.properties" \
 			--conf "spark.executor.extraJavaOptions=-Dlog4j.configurationFile=$(PWD)/src/main/resources/log4j2.properties" \
 			$(JAR) $$graph $(OUTPUT_DF) $(ITER) $(if $(filter true,$(PLOT)),--plot) $(if $(filter true,$(DEBUG)),--debug); \
 		grep '^real' time_rdd.log | awk -v g=$$graph -v i=$(ITER) -v n=$$nodes -v e=$$edges '{print "RDD;" g ";" i ";" n ";" e ";" $$2}' >> $(BENCH_CSV); \
+		grep '^real' time_rdd_optimized.log | awk -v g=$$graph -v i=$(ITER) -v n=$$nodes -v e=$$edges '{print "RDD_Optimized;" g ";" i ";" n ";" e ";" $$2}' >> $(BENCH_CSV); \
 		grep '^real' time_df.log | awk -v g=$$graph -v i=$(ITER) -v n=$$nodes -v e=$$edges '{print "DF;" g ";" i ";" n ";" e ";" $$2}' >> $(BENCH_CSV); \
 	done < tmp_stats_sorted.csv
 	@rm -f tmp_stats.csv tmp_stats_sorted.csv

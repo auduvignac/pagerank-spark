@@ -5,45 +5,65 @@ import sys
 
 def plot_benchmarks(csv_file: str, output_file: str, x_axis: str = "nodes"):
     """
-    Trace les temps d'exécution RDD vs DF en fonction de la taille du graphe.
-    
+    Trace les temps d'exécution RDD, RDD_Optimized et DF en fonction de la
+    taille du graphe.
+
     Args:
         csv_file (str): chemin vers benchmark.csv
+        output_file (str): fichier image de sortie
         x_axis (str): "nodes" ou "edges" (abscisse du graphe)
     """
-    # Charger avec séparateur explicite
     df = pd.read_csv(csv_file, sep=";")
 
-    # Forcer les colonnes numériques
+    # Conversion numérique explicite
     df["nodes"] = pd.to_numeric(df["nodes"], errors="coerce")
     df["edges"] = pd.to_numeric(df["edges"], errors="coerce")
-    df["time"] = pd.to_numeric(df["time"], errors="coerce")
+    df["time"]  = pd.to_numeric(df["time"], errors="coerce")
 
     if x_axis not in ["nodes", "edges"]:
         raise ValueError("x_axis doit être 'nodes' ou 'edges'")
 
     plt.figure(figsize=(7, 5))
 
+    # Palette cohérente entre les méthodes
+    color_map = {
+        "RDD": "#1f77b4",
+        "RDD_Optimized": "#2ca02c",
+        "DF": "#ff7f0e"
+    }
+
+    # Noms plus clairs pour la légende
+    label_map = {
+        "RDD": "RDD classique",
+        "RDD_Optimized": "RDD optimisé",
+        "DF": "DataFrame"
+    }
+
     for method in df["method"].unique():
-        subset = df[df["method"] == method]
+        subset = df[df["method"] == method].sort_values(by=x_axis)
+        color = color_map.get(method, None)
+        label = label_map.get(method, method)
+
         plt.plot(
-            subset[x_axis].to_numpy(),   # conversion explicite
-            subset["time"].to_numpy(),   # conversion explicite
+            subset[x_axis].to_numpy(),
+            subset["time"].to_numpy(),
             marker="o",
-            label=method,
+            label=label,
             linestyle="--",
+            color=color
         )
 
-        # Ajouter les valeurs au-dessus des points
+        # Affichage des valeurs au-dessus des points
         for x, y in zip(subset[x_axis], subset["time"]):
             plt.text(x, y + 0.1, f"{y:.2f}", ha="center", fontsize=9)
 
     plt.xlabel("Nombre de nœuds" if x_axis == "nodes" else "Nombre d'arêtes", fontsize=12)
     plt.ylabel("Temps d'exécution (s)", fontsize=12)
-    plt.title("Comparaison RDD vs DF (Spark PageRank)", fontsize=14)
+    plt.title("Comparaison RDD / RDD optimisé / DataFrame (Spark PageRank)", fontsize=14)
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.6)
 
+    plt.tight_layout()
     plt.savefig(output_file, dpi=150, bbox_inches="tight")
     print(f"✅ Figure enregistrée : {output_file}")
 
