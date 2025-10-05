@@ -56,18 +56,9 @@ class MainDFSpec extends AnyFunSuite with SparkTestSession {
 
   test("computePageRank converge correctement sur sample_graph.txt (DF)") {
 
-    // Ensemble des noeuds
-    val allNodes = links.select("page")
-      .union(links.select("outlink"))
-      .distinct()
-      .as[String]
-      .collect()
-      .sorted
-
     // Calcul complet avec 50 itérations
     val result = PageRankDF.computePageRank(
       links,
-      allNodes,
       iterations = 10,
       debug = false,
       logger = testLogger

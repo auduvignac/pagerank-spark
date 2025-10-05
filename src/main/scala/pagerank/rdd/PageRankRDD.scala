@@ -4,6 +4,8 @@ import org.apache.log4j.Logger
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 
+import pagerank.PageRankUtils
+
 object PageRankRDD {
 
     // Implémentation d'une itération de l’algorithme PageRank
@@ -54,8 +56,8 @@ object PageRankRDD {
       iterations: Int,
       debug: Boolean = false,
       plot: Boolean = false,
-      outputDir: Option[String] = None,
-      logger: Logger
+      logger: Logger,
+      outputDir: Option[String] = None
   )(implicit spark: SparkSession): RDD[(String, Double)] = {
 
     val sc = spark.sparkContext
@@ -74,9 +76,13 @@ object PageRankRDD {
 
     var v: RDD[(String, Double)] = allNodes.map(n => (n, 1.0 / N))
 
-    // Historique facultatif
-    val history = if (plot) Some(scala.collection.mutable.ArrayBuffer.empty[Map[String, Double]]) else None
-    if (plot) history.get.append(v.collect().toMap)
+    val history =
+      if (plot) {
+        val buf = scala.collection.mutable.ArrayBuffer.empty[Map[String, Double]]
+        PageRankUtils.appendSnapshot(Some(buf), v)
+        Some(buf)
+      } else None
+
 
     for (i <- 1 to iterations) {
       v = oneStep(v, linksFull, allNodes, debug, logger)
@@ -89,31 +95,13 @@ object PageRankRDD {
         }
       }
 
-      if (plot) {
-        history.get.append(v.collect().toMap)
-      }
+      if (plot)
+        PageRankUtils.appendSnapshot(history, v)
     }
 
     // Export CSV si demandé
     if (plot && outputDir.isDefined) {
-      import java.io.{File, PrintWriter}
-
-      val outDir = new File(outputDir.get)
-      if (!outDir.exists()) outDir.mkdirs()
-
-      val outFile = new PrintWriter(s"${outputDir.get}/history.csv")
-      try {
-        val nodes = allNodes.collect().sorted
-        outFile.println("Iteration," + nodes.mkString(","))
-        for ((snapshot, i) <- history.get.zipWithIndex) {
-          val line = nodes.map(n => snapshot.getOrElse(n, 0.0))
-          outFile.println(s"$i," + line.mkString(","))
-        }
-      } finally {
-        outFile.close()
-      }
-
-      logger.info(s"==== Historique PageRank exporté vers ${outputDir.get}/history.csv ====")
+      PageRankUtils.exportHistoryToCSV(history.get.toSeq, outputDir.get, logger)
     }
 
     v

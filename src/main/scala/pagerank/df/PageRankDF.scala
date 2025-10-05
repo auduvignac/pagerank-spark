@@ -4,6 +4,8 @@ import org.apache.log4j.Logger
 import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
 import org.apache.spark.sql.functions._
 
+import pagerank.PageRankUtils
+
 object PageRankDF {
 
   /** Une itération de l’algorithme PageRank */
@@ -50,7 +52,6 @@ object PageRankDF {
       }
     }
 
-
     val allNodesDF = allNodes.toDF("page")
 
     val result = allNodesDF
@@ -60,26 +61,36 @@ object PageRankDF {
     result
   }
 
-  /** Calcul complet du PageRank sur N itérations */
+  // Calcul complet du PageRank sur N itérations (avec option d'historique)
   def computePageRank(
       links: DataFrame,
-      allNodes: Seq[String],
       iterations: Int,
       debug: Boolean = false,
-      logger: Logger,
       plot: Boolean = false,
-      outputPath: Option[String] = None
+      logger: Logger,
+      outputDir: Option[String] = None
   )(implicit spark: SparkSession): DataFrame = {
 
     import spark.implicits._
 
+    val allNodes = links.select("page")
+          .union(links.select("outlink"))
+          .distinct()
+          .as[String]
+          .collect()
+          .sorted
+
     val N = allNodes.length.toDouble
     var v = allNodes.map(n => (n, 1.0 / N)).toSeq.toDF("page", "rank")
 
-    // Si on est en mode "plot", conservation de l'historique
+    // Si mode "plot" activé, conservation de l'historique
     val history =
-      if (plot) scala.collection.mutable.ArrayBuffer(v.collect().map(r => r.getString(0) -> r.getDouble(1)).toMap)
-      else null
+      if (plot) {
+        val buf = scala.collection.mutable.ArrayBuffer.empty[Map[String, Double]]
+        PageRankUtils.appendSnapshot(Some(buf), v)
+        Some(buf)
+      } else None
+
 
     for (i <- 1 to iterations) {
       v = oneStep(v, links, allNodes, debug, logger)
@@ -94,26 +105,13 @@ object PageRankDF {
         }
       }
 
-      if (plot) {
-        history.append(v.collect().map(r => r.getString(0) -> r.getDouble(1)).toMap)
-      }
+      if (plot)
+        PageRankUtils.appendSnapshot(history, v)
     }
 
     // === Export CSV si demandé ===
-    if (plot && outputPath.nonEmpty) {
-      val dir = new java.io.File(outputPath.get)
-      if (!dir.exists()) dir.mkdirs()
-      val outFile = new java.io.PrintWriter(s"${outputPath.get}/history.csv")
-      try {
-        outFile.println("Iteration," + allNodes.mkString(","))
-        for ((snapshot, i) <- history.zipWithIndex) {
-          val line = allNodes.map(n => snapshot.getOrElse(n, 0.0))
-          outFile.println(s"$i," + line.mkString(","))
-        }
-      } finally {
-        outFile.close()
-      }
-      logger.info(s"==== Historique PageRank sauvegardé dans ${outputPath.get}/history.csv ====")
+    if (plot && outputDir.isDefined) {
+      PageRankUtils.exportHistoryToCSV(history.get.toSeq, outputDir.get, logger)
     }
 
     v

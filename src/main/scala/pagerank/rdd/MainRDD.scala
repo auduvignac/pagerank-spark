@@ -40,10 +40,9 @@ object MainRDD {
       iterations = iterations,
       debug = debug,
       plot = plot,
-      outputDir = Some(output),
-      logger = logger
+      logger = logger,
+      outputDir = Some(output)
     )
-
 
     logger.info("==== [Fin d'exécution] PageRank RDD ====")
     spark.stop()
