@@ -1,0 +1,53 @@
+# === IDE & outils de dev ===
+.idea/
+.metals/
+.vscode/
+
+# === Fichiers temporaires ou logs ===
+*.bak
+*.log
+*.swp
+*.tmp
+
+# === Python scripts / notebooks ===
+__pycache__/
+*.pyc
+*.pyo
+*.ipynb_checkpoints/
+
+# === LaTeX ===
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.glo
+*.gls
+*.glsdefs
+*.idx
+*.ilg
+*.ind
+*.ist
+*.lof
+*.log
+*.lot
+*.nav
+*.out
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
+*.vrb
+*.xdy
+*.xdv
+
+# === SBT / Scala build ===
+target/
+project/target/
+project/project/
+
+# === Données et sorties locales ===
+data/wiki-*.txt
+output/
+*.csv

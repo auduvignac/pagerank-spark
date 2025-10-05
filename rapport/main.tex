@@ -1,0 +1,446 @@
+%pdflatex -synctex=1 -interaction=nonstopmode %.tex|makeindex %.glo -t %.glg -s %.ist -o %.gls|pdflatex -synctex=1 -interaction=nonstopmode %.tex|makeindex %.nmn -t %.nmg -s %.ist -o %.nmd|pdflatex -synctex=1 -interaction=nonstopmode %.tex|makeindex %.jmn -t %.jmg -s %.ist -o %.jmd|pdflatex -synctex=1 -interaction=nonstopmode %.tex|biber %|pdflatex -synctex=1 -interaction=nonstopmode %.tex|makeindex %.idx|pdflatex -synctex=1 -interaction=nonstopmode %.tex|pdflatex -synctex=1 -interaction=nonstopmode %.tex|"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe" %.pdf
+\documentclass[conference]{IEEEtran}
+
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{array}
+\usepackage{balance}
+\usepackage[french]{babel}
+
+\usepackage[backend=biber,style=ieee]{biblatex}
+\addbibresource{bibliography.bib} % au lieu de \bibliography
+
+\usepackage{booktabs}
+%\usepackage{cite} /!\ incompatbile avec le pakcage biblatex
+\usepackage{fancyhdr}
+%\usepackage{fontspec}  % requis avec xelatex/lualatex
+\usepackage{float}
+\usepackage{glossaries}
+\usepackage{graphicx}
+\usepackage[scaled]{helvet}
+\usepackage{inconsolata}  % police monospace moderne
+\usepackage{hyperref}
+\usepackage[utf8]{inputenc}
+\usepackage{lastpage}
+\usepackage{listings}
+\usepackage{longtable}
+\usepackage{placeins}
+\usepackage{sansmath}             % Pour activer la police sans-serif dans les maths
+\usepackage{stfloats}
+\usepackage[caption=false,font=footnotesize]{subfig}
+\usepackage{tikz}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage{xurl}
+
+\usetikzlibrary{arrows.meta, positioning}
+
+\floatname{algorithm}{Algorithme}
+
+\renewcommand{\figurename}{Figure}
+\renewcommand{\lstlistingname}{Code source}
+\renewcommand{\refname}{Bibliographie}
+\renewcommand{\tablename}{Tableau}
+\renewcommand{\thetable}{\arabic{table}}
+% Arial pdflatex
+\renewcommand{\familydefault}{\sfdefault}
+\sansmath                         % Appliquer Helvetica dans les équations
+\renewcommand{\arraystretch}{1.2}
+
+% Arial xelatex
+%\setmonofont{Arial}    % Arial utilisée comme monospace (attention : ce n'est pas une vraie monospace)
+\definecolor{codegray}{rgb}{0.4,0.4,0.4}
+\definecolor{codeblue}{rgb}{0.0,0.2,0.7}
+\definecolor{codegreen}{rgb}{0.0,0.5,0.3}
+\definecolor{codepurple}{rgb}{0.5,0.0,0.5}
+\definecolor{backcolor}{rgb}{0.98,0.98,0.98}
+
+\lstset{
+    backgroundcolor=\color{backcolor},   
+    basicstyle=\ttfamily\scriptsize,
+    breaklines=true,                     
+    captionpos=b,                        
+    frame=single,                        
+    keywordstyle=\color{codeblue}\bfseries,
+    commentstyle=\color{codegreen}\itshape,
+    stringstyle=\color{codepurple},
+    identifierstyle=\color{black},
+    language=Python,
+    numbers=none,
+    numberstyle=\tiny\color{codegray},
+    showstringspaces=false,
+    showspaces=false,
+    showtabs=false,
+    tabsize=4
+}
+
+
+\IEEEoverridecommandlockouts
+
+\renewcommand\IEEEkeywordsname{Keywords}
+
+\hbadness=10000
+\vbadness=10000
+\hfuzz=2pt
+\setlength{\emergencystretch}{3em}
+
+
+\title{\LARGE \bf
+PageRank en Spark
+}
+
+\author{
+    \IEEEauthorblockN{Aurélien Duvignac-Rosa, Jean-Marc Fauvel, Edoardo Piciucchi}
+}
+
+
+\newcommand{\lesss}{\rotatebox[origin=c]{90}{$\land$}}
+\newcommand{\less}{\ \lesss\ }
+
+\newcommand{\biggg}{\rotatebox[origin=c]{90}{$\lor$}}
+\newcommand{\bg}{\ \biggg\ }
+
+\renewcommand*{\glossaryname}{Glossaire}
+
+\makeglossaries
+
+\input{glossaire.tex}
+
+
+\begin{document}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{Page \thepage\ / \pageref{LastPage}}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\maketitle
+\thispagestyle{empty}
+\pagestyle{empty}
+
+\begin{abstract}
+TODO
+\end{abstract}
+\begin{IEEEkeywords}
+PageRank ; Spark
+\end{IEEEkeywords}
+
+\section{Présentation du projet}
+
+Le projet \textbf{PageRank en Spark} consiste à implémenter l'algorithme de PageRank en utilisant deux approches distinctes : \textbf{RDD} et \textbf{DataFrame}.  
+Les graphes utilisés proviennent de Wikipédia\footnote{Accès via Dropbox : \href{https://www.dropbox.com/sh/serapy4ro02phu5/AAASs2Wb2WuwfNoX1FNwwqBDa}{Jeu de graphes}}. (un graphe par langue), fournis au format texte, chaque ligne correspondant à une page suivie de ses liens sortants.  
+
+\begin{verbatim}
+page1 | lien1-1 | lien1-2 | ...
+page2 | lien2-1 | lien2-2 | ...
+\end{verbatim}
+
+Chaque page est ainsi associée à une liste de liens sortants. Certains de ces liens peuvent pointer vers des pages inexistantes (liens rouges de Wikipédia), qu'il faudra ignorer lors de la construction du graphe.  
+
+\subsection{Objectifs}
+\begin{itemize}
+    \item Développer une première version \textit{baseline} en Spark RDD, sans optimisation particulière (pas de partitionnement avancé).  
+    \item Développer ensuite une version optimisée afin d'améliorer l'efficacité de l'algorithme.  
+    \item Réaliser une comparaison des performances entre l'approche RDD et l'approche DataFrame.  
+\end{itemize}
+
+\subsection{Analyse expérimentale}
+L'expérimentation portera sur plusieurs graphes de tailles différentes, afin d'évaluer :  
+\begin{itemize}
+    \item la précision et la robustesse des résultats obtenus,  
+    \item l'impact de la taille du graphe sur le temps d'exécution,  
+    \item les différences de performance entre les deux approches Spark.  
+\end{itemize}
+L'ensemble des expérimentations présentées ci-après a été réalisé en Scala, en utilisant les API RDD et DataFrame de Spark. Il convient de rappeler que Spark propose également des interfaces équivalentes en Python (PySpark) ou en Java, mais le fonctionnement interne reste identique.
+
+\subsection{Rendu souhaité}
+Le rapport doit présenter la méthodologie, les implémentations, ainsi que l'analyse comparative des résultats obtenus.  
+
+\section{Introduction} \label{section:Introduction}
+
+Aux prémices du web, les premiers moteurs de recherche s'appuyaient sur un ensemble de techniques hétérogènes pour classer et proposer des résultats aux utilisateurs. 
+Les robots d'indexation (\textit{web crawlers}) exploraient les sites afin d'en extraire et indexer les mots-clés. 
+Cependant, cette approche demeurait aisément manipulable : il suffisait en effet d'ajouter artificiellement une liste de mots-clés dépourvus de pertinence pour influencer le classement d'un site.  
+
+D'autres méthodes furent également envisagées, telles que l'exploitation des mentions \og J'aime \fg{} ou des évaluations fournies par les utilisateurs. 
+Néanmoins, ces indicateurs étaient appliqués de manière irrégulière et présentaient une fiabilité limitée. 
+L'analyse des clics effectués par les internautes après une requête fut également explorée, mais elle souffrait d'un biais important : les utilisateurs pouvaient être attirés par des liens secondaires ou distrayants, sans rapport direct avec leur recherche initiale.  
+
+Enfin, certains moteurs de recherche tentèrent de combiner les résultats issus de plusieurs systèmes concurrents. 
+Cette stratégie se révélait toutefois peu pertinente dès lors qu'un outil surpassait systématiquement les autres en termes de performance et de qualité des résultats.  
+
+À ses débuts, Internet était souvent perçu comme un vaste ensemble de sites indépendants, où l'information pouvait théoriquement se trouver en n'importe quel point du réseau. 
+Cette vision s'est toutefois révélée réductrice.  
+En réalité, le web forme une structure d'hyperliens interconnectés, où certaines pages jouent un rôle central.  
+
+Ainsi, l'information pertinente n'est pas distribuée de manière aléatoire : elle tend à se concentrer sur les sites les plus fortement connectés. 
+Ces nœuds centraux du réseau occupent une place stratégique, car ils reflètent non seulement la densité des connexions, mais également l'importance relative des pages dans l'écosystème du web.  
+
+La prise en compte de la structure du web conduit donc à un constat fondamental : toutes les pages n'occupent pas la même place au sein du réseau. 
+Certaines, fortement interconnectées, jouent un rôle de carrefour de l'information et se révèlent plus pertinentes que d'autres.  
+
+C'est précisément sur cette idée qu'a été développé l'algorithme \textbf{PageRank}, proposé par Larry Page et Sergey Brin à la fin des années 1990. 
+En exploitant la structure des liens hypertextes, PageRank évalue l'importance relative des pages et permet de classer les résultats de recherche de manière plus pertinente et robuste que les méthodes antérieures.  
+
+\section{Algorithme PageRank}
+
+L'algorithme \textbf{PageRank} repose sur l'idée que l'évaluation d'une page ne peut se limiter à sa seule présence dans le réseau, mais doit prendre en compte à la fois sa \textit{pertinence} et son \textit{importance}.  
+
+\begin{itemize}
+    \item La \textbf{pertinence} est liée au contenu de la page : une page est considérée comme pertinente lorsqu'elle contient des mots-clés correspondant à la requête de l'utilisateur, en particulier lorsqu'ils apparaissent dans le voisinage de liens pointant vers cette page.  
+    \item L'\textbf{importance}, quant à elle, dépend de la structure du réseau : une page gagne en importance lorsqu'elle reçoit de nombreux liens entrants, en particulier depuis d'autres pages elles-mêmes importantes, situées au cœur des \gls{sfc}.  
+\end{itemize}
+
+Pour formaliser cette intuition, PageRank propose de simuler le comportement d'un internaute aléatoire parcourant le web.  
+Cet internaute \og vote avec ses pieds \fg{} : il quitte spontanément les pages peu pertinentes ou isolées pour se diriger vers celles qui apparaissent comme plus centrales et mieux connectées.  
+L'algorithme consiste alors à calculer la probabilité qu'un tel internaute, après un grand nombre de pas, se retrouve sur une page donnée.  
+
+Cette probabilité constitue le \textbf{score PageRank}, qui fournit une mesure quantitative de l'importance relative de chaque page dans le réseau.  
+Ainsi, les pages appartenant aux \gls{sfc} et disposant d'un grand nombre de liens entrants se voient attribuer un score élevé, tandis que les composantes périphériques, telles que les \gls{iso}, conservent un poids négligeable. 
+
+\subsection{Formulation mathématique}
+
+Le comportement de l'internaute aléatoire peut être modélisé à l'aide d'un \textbf{processus de Markov}.  
+Dans ce cadre, le web est représenté par un graphe orienté dont les nœuds correspondent aux pages, et dont les arêtes représentent les liens hypertextes.  
+
+À chaque arête est associée une probabilité de transition, correspondant à la probabilité que l'internaute, présent sur une page donnée, suive un lien vers une autre page.  
+Ainsi :  
+\begin{itemize}
+    \item si l'on connaît la probabilité d'être sur chaque nœud à un instant donné,  
+    \item et que l'on dispose des probabilités de transition entre les nœuds,  
+\end{itemize}  
+alors il devient possible de calculer la distribution de probabilité de la position de l'internaute à l'instant suivant.  
+
+Ce mécanisme définit une \textbf{chaîne de Markov} sur l'ensemble des pages du réseau.  
+Dans le cas d'un graphe fortement connecté (\gls{sfc}), cette chaîne converge vers une distribution stationnaire unique.  
+Cette distribution stationnaire correspond précisément aux valeurs de \textbf{PageRank} : la probabilité limite que l'internaute se trouve sur une page donnée après un nombre infini d'itérations.
+
+À partir du graphe défini dans la figure~\ref{fig:PageRank_exemple}, on peut construire la \textbf{matrice de transition} associée, qui mesure la probabilité de passer d'une page à une autre en suivant les liens sortants.  
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[scale=0.5]{figures/PageRank_exemple}
+    \caption{Exemple de graphe pour l'illustration du calcul du PageRank.}
+    \label{fig:PageRank_exemple}
+\end{figure}
+
+Par définition, une telle matrice est \textbf{stochastique}, c'est-à-dire que la somme des probabilités de chaque colonne est égale à 1.  
+
+La matrice $M$ associée au graphe, avec les pages notées $A, B, C, D$, est la suivante :  
+
+\[
+M =
+\begin{bmatrix}
+0   & \tfrac{1}{2} & 1 & 0 \\
+\tfrac{1}{3} & 0 & 0 & \tfrac{1}{2} \\
+\tfrac{1}{3} & 0 & 0 & \tfrac{1}{2} \\
+\tfrac{1}{3} & \tfrac{1}{2} & 0 & 0
+\end{bmatrix}
+\]
+
+où :  
+\begin{itemize}
+    \item la première colonne correspond aux transitions depuis la page $A$,  
+    \item la deuxième colonne correspond aux transitions depuis la page $B$,  
+    \item la troisième colonne correspond aux transitions depuis la page $C$,  
+    \item la quatrième colonne correspond aux transitions depuis la page $D$.  
+\end{itemize}
+
+Par exemple, la deuxième colonne indique qu'un internaute situé sur la page $B$ a une probabilité $\tfrac{1}{2}$ d'aller vers $A$ et une probabilité $\tfrac{1}{2}$ d'aller vers $D$. 
+
+À chaque itération, la distribution des probabilités de présence sur les différentes pages est mise à jour à l'aide de la matrice de transition $M$.  
+
+Ainsi, si $v_{i}$ désigne le vecteur des probabilités d'être sur chaque page à l'itération $i$, on a la relation récurrente :  
+
+\[
+v_{i} = M \times v_{i-1}
+\]
+
+Par un raisonnement par récurrence, on en déduit que :  
+
+\[
+v_{i} = M^{i} \times v_{0}
+\]
+
+où $v_{0}$ est la distribution initiale des probabilités (par exemple une distribution uniforme sur l'ensemble des pages). 
+
+Le vecteur initial $v_{0}$ est défini en supposant que la probabilité de commencer la navigation sur l'une quelconque des pages du graphe est \textbf{équiprobable}, c'est-à-dire uniformément répartie entre l'ensemble des sites.
+
+En supposant qu'il existe k sites distincts :
+
+\[
+v_{0} =
+\begin{bmatrix}
+\frac{1}{k} \\
+\vdots \\
+\frac{1}{k} \\
+\end{bmatrix}
+\]
+
+Ainsi, dans l'exemple présenté (cf. \ref{fig:PageRank_exemple}) :
+
+\[
+v_{0} =
+\begin{bmatrix}
+\frac{1}{4} \\
+\frac{1}{4} \\
+\frac{1}{4} \\
+\frac{1}{4} \\
+\end{bmatrix}
+\]
+
+\subsection{Calcul matriciel des premières itérations du PageRank}
+
+On part du vecteur initial uniforme
+\[
+v_{0} =
+\begin{bmatrix}
+\frac{1}{4}\\[2pt]
+\frac{1}{4}\\[2pt]
+\frac{1}{4}\\[2pt]
+\frac{1}{4}
+\end{bmatrix},
+\qquad
+M =
+\begin{bmatrix}
+0   & \tfrac{1}{2} & 1 & 0 \\
+\tfrac{1}{3} & 0 & 0 & \tfrac{1}{2} \\
+\tfrac{1}{3} & 0 & 0 & \tfrac{1}{2} \\
+\tfrac{1}{3} & \tfrac{1}{2} & 0 & 0
+\end{bmatrix}.
+\]
+
+\paragraph{Calcul de \(v_{1}=Mv_{0}\).}
+\[
+v_{1} =
+\begin{bmatrix}
+0\cdot \tfrac14 + \tfrac12\cdot \tfrac14 + 1\cdot \tfrac14 + 0\cdot \tfrac14 \\
+\tfrac13\cdot \tfrac14 + 0\cdot \tfrac14 + 0\cdot \tfrac14 + \tfrac12\cdot \tfrac14 \\
+\tfrac13\cdot \tfrac14 + 0\cdot \tfrac14 + 0\cdot \tfrac14 + \tfrac12\cdot \tfrac14 \\
+\tfrac13\cdot \tfrac14 + \tfrac12\cdot \tfrac14 + 0\cdot \tfrac14 + 0\cdot \tfrac14
+\end{bmatrix}
+=
+\begin{bmatrix}
+\frac{3}{8}\\[2pt]
+\frac{5}{24}\\[2pt]
+\frac{5}{24}\\[2pt]
+\frac{5}{24}
+\end{bmatrix}.
+\]
+
+\paragraph{Itérations suivantes.}
+\[
+v_{2}=Mv_{1}=
+\begin{bmatrix}
+\frac{5}{16}\\[2pt]
+\frac{11}{48}\\[2pt]
+\frac{11}{48}\\[2pt]
+\frac{11}{48}
+\end{bmatrix},
+\qquad
+v_{3}=Mv_{2}=
+\begin{bmatrix}
+\frac{11}{32}\\[2pt]
+\frac{7}{32}\\[2pt]
+\frac{7}{32}\\[2pt]
+\frac{7}{32}
+\end{bmatrix}.
+\]
+
+Chaque vecteur \(v_i\) donne la distribution de probabilité d'être sur les pages \((A,B,C,D)\) après \(i\) itérations.
+
+Après un nombre suffisant d'itérations, le vecteur des probabilités converge vers une distribution stationnaire. 
+Dans notre exemple, après $50$ itérations, on obtient :  
+
+\[
+v_{50} =
+\begin{bmatrix}
+\frac{1}{3} \\[4pt]
+\frac{2}{9} \\[4pt]
+\frac{2}{9} \\[4pt]
+\frac{2}{9}
+\end{bmatrix}.
+\]
+
+Cette distribution stationnaire traduit le comportement limite de l'internaute aléatoire : la probabilité d'aboutir sur le nœud $A$ est de $\tfrac{1}{3}$, tandis que chacun des nœuds $B$, $C$ et $D$ possède une probabilité de $\tfrac{2}{9}$. 
+Ce résultat illustre la définition même du \textbf{PageRank}, qui consiste à mesurer l'importance relative des pages à partir de la structure du graphe et de la dynamique du processus de Markov associé.  
+
+Pour le graphe trivial présenté en figure~\ref{fig:PageRank_exemple}, il est possible de déterminer analytiquement, à partir de la matrice de transition,  l'évolution exacte du vecteur de probabilité à chaque itération.  Cependant, pour des graphes de taille plus importante,  ce calcul matriciel devient rapidement coûteux en temps de calcul et en mémoire. Il est alors préférable de raisonner en termes d'algorithme itératif. Le déroulement d'une première itération du \textbf{PageRank} permet d'illustrer ce fonctionnement.
+
+\subsection{Exemple d'une première itération du PageRank} \label{subsection:Exemple d'une première itération du PageRank}
+
+Le graphe présenté sur la figure \ref{fig:PageRank_exemple} peut être présenté sous la forme suivante :
+\[
+\begin{cases}
+A \to \{B, C, D\} \\
+B \to \{A, C\} \\
+C \to \{B, D\} \\
+D \to \{A\}
+\end{cases}
+\]
+
+\paragraph{Initialisation}
+Avec $N=4$ pages, le vecteur initial est uniforme :
+\[
+v^{(0)} = \begin{bmatrix}
+0.25 & 0.25 & 0.25 & 0.25
+\end{bmatrix}^{\top}
+\]
+c'est-à-dire :
+\[
+A = 0.25, \quad B = 0.25, \quad C = 0.25, \quad D = 0.25.
+\]
+
+\paragraph{Distribution des contributions}
+Chaque page distribue sa probabilité uniformément à ses voisins sortants :
+\[
+\begin{aligned}
+A &: \tfrac{0.25}{3} = 0.0833 \quad \text{vers } B, C, D \\
+B &: \tfrac{0.25}{2} = 0.125 \quad \text{vers } A, C \\
+C &: \tfrac{0.25}{2} = 0.125 \quad \text{vers } B, D \\
+D &: \tfrac{0.25}{1} = 0.250 \quad \text{vers } A
+\end{aligned}
+\]
+
+\paragraph{Somme des contributions reçues}
+On regroupe alors les valeurs reçues par chaque nœud :
+\[
+\begin{aligned}
+A &= 0.125 \; (\text{de B}) + 0.250 \; (\text{de D}) = 0.375 \\
+B &= 0.0833 \; (\text{de A}) + 0.125 \; (\text{de C}) = 0.2083 \\
+C &= 0.0833 \; (\text{de A}) + 0.125 \; (\text{de B}) = 0.2083 \\
+D &= 0.0833 \; (\text{de A}) + 0.125 \; (\text{de C}) = 0.2083
+\end{aligned}
+\]
+
+\paragraph{Vecteur obtenu}
+Le vecteur $v^{(1)}$ après une itération est donc :
+\[
+v^{(1)} = \begin{bmatrix}
+0.375 & 0.2083 & 0.2083 & 0.2083
+\end{bmatrix}^{\top}
+\]
+
+La somme reste normalisée :
+\[
+\sum_{i} v^{(1)}_i = 1.0
+\]
+ce qui confirme la conservation de la probabilité totale.
+
+La figure~\ref{fig:PageRank_demo} illustre la convergence des probabilités associées à chacun des nœuds $A$, $B$, $C$ et $D$ du graphe. 
+La courbe bleue correspond à la probabilité de se retrouver sur le nœud $A$, tandis que les courbes orange, verte et rouge représentent respectivement les probabilités d'atteindre les nœuds $B$, $C$ et $D$.  
+
+L'axe des abscisses indique le nombre d'itérations, tandis que l'axe des ordonnées représente les probabilités associées à chaque nœud. 
+On observe que toutes les courbes débutent à la valeur initiale $\tfrac{1}{4}$, correspondant à la distribution uniforme de départ, puis convergent rapidement vers leurs valeurs stationnaires.  
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[scale=0.5]{figures/PageRank_evolution_demo}
+    \caption{Convergence du graphe de la figure~\ref{fig:PageRank_exemple} sur 50 itérations, obtenue à l'aide de l'implémentation RDD de l'algorithme PageRank.}
+    \label{fig:PageRank_demo}
+\end{figure}
+
+\end{document}
