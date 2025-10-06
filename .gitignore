@@ -48,6 +48,7 @@ project/target/
 project/project/
 
 # === Données et sorties locales ===
+graphs/
 data/wiki-*.txt
 output*
 *.csv

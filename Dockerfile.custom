@@ -1,0 +1,18 @@
+# Étendre l'image Spark officielle utilisée
+FROM ghcr.io/osekoo/spark:3.5
+
+LABEL maintainer="auduvignac <aurelienduvignac@hotmail.fr>"
+LABEL description="Image personnalisée pour le projet PageRankSpark"
+
+USER root
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    bash time dos2unix vim python3 python3-pip && \
+    pip3 install pandas matplotlib seaborn && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . /app
+RUN chmod +x /app/spark-submit.sh || true
+
+CMD ["tail", "-f", "/dev/null"]
