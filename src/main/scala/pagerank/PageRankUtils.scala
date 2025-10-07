@@ -1,9 +1,14 @@
 package pagerank
 
-import java.io.{File, PrintWriter}
+import java.io.{File, BufferedWriter, FileWriter, PrintWriter}
 import org.apache.log4j.Logger
 
 object PageRankUtils {
+
+  // =======================
+  // Logger
+  // =======================
+  val logger: Logger = Logger.getLogger(getClass.getName)
 
   /**
     * Sauvegarde un historique PageRank au format CSV
@@ -54,5 +59,32 @@ object PageRankUtils {
   ): Unit =
     history.foreach(_.append(df.collect().map(r => r.getString(0) -> r.getDouble(1)).toMap))
 
+  /** Ajoute un résultat dans le fichier benchmark.csv */
+  def appendBenchmark(
+      method: String,
+      graph: String,
+      iterations: Int,
+      nodes: Long,
+      edges: Long,
+      time: Double,
+      outputDir: String
+  ): Unit = {
+    val file = new File(s"$outputDir/benchmark.csv")
+    val header = "method;graph;iter;nodes;edges;time\n"
+    val line   = f"$method;$graph;$iterations;$nodes;$edges;$time%.2f\n"
+
+    val outDir = new File(outputDir)
+    if (!outDir.exists()) outDir.mkdirs()
+
+    val isNewFile = !file.exists()
+    val writer = new BufferedWriter(new FileWriter(file, true))
+    try {
+      if (isNewFile) writer.write(header)
+      writer.write(line)
+    } finally {
+      writer.close()
+    }
+    logger.info(f"==== Fichier benchmark exporté : $file ====")
+  }
 
 }
