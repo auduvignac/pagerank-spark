@@ -38,6 +38,9 @@ object Main {
       debug: Boolean,
       plot: Boolean = false
   )(implicit spark: SparkSession): Unit = {
+
+    logger.info(s"==== [Traitement du graphe] [RDD] [$input] ====")
+
     val start = System.nanoTime()
 
     val lines: RDD[String] = GraphUtils.readAsRDD(input)
@@ -66,6 +69,9 @@ object Main {
       debug: Boolean,
       plot: Boolean = false
   )(implicit spark: SparkSession): Unit = {
+
+    logger.info(s"==== [Traitement du graphe] [DF] [$input] ====")
+
     val start = System.nanoTime()
 
     val lines = GraphUtils.readAsDataset(input)
@@ -94,6 +100,9 @@ object Main {
       debug: Boolean,
       plot: Boolean = false
   )(implicit spark: SparkSession): Unit = {
+
+    logger.info(s"==== [Traitement du graphe] [RDD optimisé] [$input] ====")
+
     val start = System.nanoTime()
 
     val lines: RDD[String] = GraphUtils.readAsRDD(input)
@@ -147,41 +156,44 @@ object Main {
     logger.info(s"-> Plot: $plot")
     logger.info(s"-> Debug: $debug")
 
+    // possibilité de passer plusieurs fichiers séparés par des virgules
+    // pour en générer une boucle
+    val inputs = input.split(",").toList
+
     // Initialisation Spark
     implicit val spark: SparkSession = SparkSession.builder
       .appName(s"PageRank-$method")
       .getOrCreate()
 
-    try {
-      method match {
-        case "rdd" =>
-          computePageRankRDD(input, output, iterations, debug, plot)
+    for (input <- inputs) {
 
-        case "df" =>
-          computePageRankDF(input, output, iterations, debug, plot)
+      logger.info(s"==== [Traitement du graphe] $input ====")
 
-        case "rdd_optimized" =>
-          computePageRankRDDOptimized(input, output, iterations, debug, plot)
+      try {
+        method match {
+          case "rdd" =>
+            computePageRankRDD(input, output, iterations, debug, plot)
 
-        case "all" =>
-          logger.info("Exécution de toutes les variantes (RDD, DF, RDD_Optimized)")
-          computePageRankRDD(input, output, iterations, debug, plot)
-          computePageRankDF(input, output, iterations, debug, plot)
-          computePageRankRDDOptimized(input, output, iterations, debug, plot)
+          case "df" =>
+            computePageRankDF(input, output, iterations, debug, plot)
 
-        case other =>
-          System.err.println(s"Type d'exécution inconnu : $other")
-          System.exit(1)
+          case "rdd_optimized" =>
+            computePageRankRDDOptimized(input, output, iterations, debug, plot)
+
+          case "all" =>
+            logger.info("Exécution de toutes les variantes (RDD, DF, RDD_Optimized)")
+            computePageRankRDD(input, output, iterations, debug, plot)
+            computePageRankDF(input, output, iterations, debug, plot)
+            computePageRankRDDOptimized(input, output, iterations, debug, plot)
+
+          case other =>
+            System.err.println(s"Type d'exécution inconnu : $other")
+            System.exit(1)
+        }
+      } catch {
+        case e: Exception =>
+          logger.error(s"Erreur lors du traitement de $input : ${e.getMessage}")
       }
-
-      if (plot) {
-        logger.info("Génération du graphique de convergence…")
-        // TODO: appel au script Python de plotting si nécessaire
-      }
-
-    } finally {
-      logger.info("==== [Fin d'exécution] PageRank ====")
-      spark.stop()
     }
   }
 }

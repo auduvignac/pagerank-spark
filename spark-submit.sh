@@ -56,7 +56,11 @@ $TIME_CMD spark-submit \
   $( [ "$PLOT" == "true" ] && echo "--plot" ) \
   $( [ "$DEBUG" == "true" ] && echo "--debug" )
 
-# --- Tracé optionnel ---
+# --- Tracé du PageRank optionnel ---
+echo "📈 Tracé des résultats du benchmark..."
+./scripts/plot_benchmark.py "$OUTPUT/benchmark.csv" "$OUTPUT/benchmark.png"
+
+# --- Tracé du PageRank optionnel ---
 if [ "$PLOT" == "true" ] && [ "$MODE" != "test" ]; then
   echo "📈 Tracé du PageRank..."
   ./scripts/plot_history.py "$OUTPUT/history.csv"
