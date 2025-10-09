@@ -22,7 +22,8 @@ object PageRankRDDOptimized {
       links: RDD[(String, Seq[String])],
       allNodes: RDD[String],
       debug: Boolean = false,
-      logger: Logger
+      logger: Logger,
+      partitioner: Option[org.apache.spark.Partitioner] = None
   ): RDD[(String, Double)] = {
 
     // === (1) Distribution : chaque page "src" distribue son rang à ses destinations ===
@@ -49,7 +50,7 @@ object PageRankRDDOptimized {
     val receivedRanks: RDD[(String, Double)] =
       contributionsDetailed
         .map { case (dest, _, contrib) => (dest, contrib) }
-        .reduceByKey(_ + _)
+        .reduceByKey(partitioner.getOrElse(v.partitioner.orNull), _ + _)
 
     if (debug) {
       logger.debug("==== Rangs reçus (somme des contributions entrantes) ====")
@@ -61,7 +62,7 @@ object PageRankRDDOptimized {
     // === (3) Réintégration des pages sans contribution ===
     val nextRanks = receivedRanks
       .union(allNodes.map(n => (n, 0.0)))
-      .reduceByKey(_ + _)
+      .reduceByKey(partitioner.getOrElse(v.partitioner.orNull), _ + _)
 
     nextRanks
   }
@@ -80,7 +81,19 @@ object PageRankRDDOptimized {
   )(implicit spark: SparkSession): RDD[(String, Double)] = {
 
     val sc = spark.sparkContext
-    val numPartitions = sc.defaultParallelism
+
+    // Adaptive partitioning based on input data size (avoids expensive distinct().count())
+    val inputPartitions = links.getNumPartitions
+    val useCustomPartitioning = inputPartitions <= 50  // Only use custom partitioning for small/medium graphs
+
+    val numPartitions = {
+      if (inputPartitions <= 2) sc.defaultParallelism           // Tiny: use default
+      else if (inputPartitions <= 10) sc.defaultParallelism * 2 // Small: 2x
+      else if (inputPartitions <= 50) sc.defaultParallelism * 4 // Medium: 4x
+      else inputPartitions                                       // Large: keep input partitioning
+    }
+
+    logger.info(f"Using $numPartitions partitions (input had $inputPartitions partitions, custom=${useCustomPartitioning})")
     val partitioner = new HashPartitioner(numPartitions)
 
     // === (1) Préparation du graphe complet ===
@@ -91,18 +104,25 @@ object PageRankRDDOptimized {
 
     val linksFull: RDD[(String, Seq[String])] = {
       val emptyByNode = allNodes.map(n => (n, Seq.empty[String]))
-      emptyByNode
+      val joined = emptyByNode
         .leftOuterJoin(links)
         .mapValues { case (_, outs) => outs.getOrElse(Seq.empty[String]) }
-        .partitionBy(partitioner)
-        .cache()
+
+      // Only repartition for small/medium graphs; large graphs keep natural partitioning
+      if (useCustomPartitioning) joined.partitionBy(partitioner).cache()
+      else joined.cache()
     }
 
     // === (2) Initialisation du vecteur de rangs ===
-    var v: RDD[(String, Double)] =
-      allNodes.map(n => (n, 1.0 / N))
-        .partitionBy(partitioner)
-        .persist(StorageLevel.MEMORY_AND_DISK)
+    // Adaptive persistence: MEMORY_ONLY for small/medium, cache for large
+    val storageLevel = if (useCustomPartitioning) StorageLevel.MEMORY_ONLY else StorageLevel.MEMORY_ONLY
+
+    var v: RDD[(String, Double)] = {
+      val initial = allNodes.map(n => (n, 1.0 / N))
+      // Only repartition for small/medium graphs
+      if (useCustomPartitioning) initial.partitionBy(partitioner).persist(storageLevel)
+      else initial.persist(storageLevel)
+    }
 
     // Historique facultatif (pour le plot)
     val history =
@@ -114,9 +134,10 @@ object PageRankRDDOptimized {
 
     // === (3) Boucle principale : v_{i+1} = M × v_i ===
     for (i <- 1 to iterations) {
-      val newV = oneStep(v, linksFull, allNodes, debug, logger)
-        .partitionBy(partitioner)
-        .persist(StorageLevel.MEMORY_AND_DISK)
+      // For large graphs, don't pass partitioner to avoid unnecessary shuffles
+      val partOpt = if (useCustomPartitioning) Some(partitioner) else None
+      val newV = oneStep(v, linksFull, allNodes, debug, logger, partOpt)
+        .persist(storageLevel)
 
       v.unpersist()
       v = newV
