@@ -52,7 +52,7 @@ object Main {
     val duration = (System.nanoTime() - start) / 1e9
     logger.info(f"==== Temps d'exécution RDD : $duration%.2f s ====")
 
-    PageRankUtils.appendBenchmark("RDD", input, iterations, v.count(), links.count(), duration, output)
+    PageRankUtils.appendBenchmark("RDD", input, iterations, v.count(), GraphUtils.countEdgesRDD(links), duration, output)
   }
 
   /** Exécution PageRank DataFrame */
@@ -83,7 +83,7 @@ object Main {
     val duration = (System.nanoTime() - start) / 1e9
     logger.info(f"==== Temps d'exécution DF : $duration%.2f s ====")
 
-    PageRankUtils.appendBenchmark("DF", input, iterations, v.count(), links.count(), duration, output)
+    PageRankUtils.appendBenchmark("DF", input, iterations, v.count(), GraphUtils.countEdgesDF(links), duration, output)
   }
 
   /** Exécution PageRank RDD optimisé */
@@ -114,7 +114,7 @@ object Main {
     val duration = (System.nanoTime() - start) / 1e9
     logger.info(f"==== Temps d'exécution RDD Optimisé : $duration%.2f s ====")
 
-    PageRankUtils.appendBenchmark("RDD_OPT", input, iterations, v.count(), links.count(), duration, output)
+    PageRankUtils.appendBenchmark("RDD_OPT", input, iterations, v.count(), GraphUtils.countEdgesRDD(links), duration, output)
   }
 
   // =======================

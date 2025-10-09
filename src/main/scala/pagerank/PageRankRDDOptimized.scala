@@ -59,13 +59,9 @@ object PageRankRDDOptimized {
     }
 
     // === (3) Réintégration des pages sans contribution ===
-    val nextRanks: RDD[(String, Double)] = allNodes
-      .map(n => (n, 0.0))
-      .rightOuterJoin(receivedRanks)
-      .map { case (node, (maybeZeroOpt, rank)) =>
-        val base = maybeZeroOpt.getOrElse(0.0)
-        (node, base + rank)
-      }
+    val nextRanks = receivedRanks
+      .union(allNodes.map(n => (n, 0.0)))
+      .reduceByKey(_ + _)
 
     nextRanks
   }

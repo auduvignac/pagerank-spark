@@ -49,6 +49,16 @@ object GraphUtils {
     links
   }
 
+  // Count total edges (individual outlinks) in RDD format
+  def countEdgesRDD(links: RDD[(String, Seq[String])]): Long = {
+    links.map { case (_, outlinks) => outlinks.size.toLong }.sum().toLong
+  }
+
+  // Count total edges (individual outlinks) in DataFrame format
+  def countEdgesDF(links: DataFrame): Long = {
+    links.filter("outlink IS NOT NULL").count()
+  }
+
   // Parser version Dataset[String] → DataFrame(page, outlink)
   def parseGraphDF(
       lines: Dataset[String],
@@ -62,7 +72,7 @@ object GraphUtils {
       val parts = line.split("\\|").map(_.trim)
       val page = parts.head
       if (parts.length > 1) parts.tail.filter(_.nonEmpty).map(out => (page, out))
-      else Seq.empty[(String, String)]
+      else Seq((page, null)) // Preserve pages without outlinks with null sentinel
     }.toDF("page", "outlink")
 
     if (debug) {

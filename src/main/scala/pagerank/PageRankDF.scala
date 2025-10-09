@@ -26,13 +26,15 @@ object PageRankDF {
 
       import spark.implicits._
 
-      // === (1) Calcul du degré sortant de chaque page ===
+      // === (1) Calcul du degré sortant de chaque page (ignore null outlinks) ===
       val outDegrees = links
+        .filter("outlink IS NOT NULL")
         .groupBy($"page")
         .agg(count($"outlink").as("degree"))
 
       // === (2) Distribution du rang : chaque source envoie une contribution à ses destinations ===
       val contributionsDetailed = links
+        .filter("outlink IS NOT NULL")  // Ignore pages without outlinks
         .join(v, Seq("page"))          // (page, outlink, rank)
         .join(outDegrees, Seq("page")) // (page, outlink, rank, degree)
         .withColumn("contrib", $"rank" / $"degree")
@@ -90,7 +92,7 @@ object PageRankDF {
     import spark.implicits._
 
     val allNodes = links.select("page")
-          .union(links.select("outlink"))
+          .union(links.select("outlink").filter("outlink IS NOT NULL"))
           .distinct()
           .as[String]
           .collect()
