@@ -1,10 +1,8 @@
-package pagerank.df
+package pagerank
 
 import org.apache.log4j.Logger
 import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
 import org.apache.spark.sql.functions._
-
-import pagerank.PageRankUtils
 
 object PageRankDF {
 
