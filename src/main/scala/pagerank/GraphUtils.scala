@@ -49,14 +49,36 @@ object GraphUtils {
     links
   }
 
+  // Count total unique nodes (pages) in RDD format
+  def countNodesRDD(links: RDD[(String, Seq[String])]): Long = {
+    val srcNodes = links.keys
+    val dstNodes = links.values.flatMap(identity)
+    srcNodes.union(dstNodes).distinct().count()
+  }
+
   // Count total edges (individual outlinks) in RDD format
   def countEdgesRDD(links: RDD[(String, Seq[String])]): Long = {
     links.map { case (_, outlinks) => outlinks.size.toLong }.sum().toLong
   }
 
+  // Count total unique nodes (pages) in DataFrame format
+  def countNodesDF(links: DataFrame, allPages: Dataset[String])(implicit spark: SparkSession): Long = {
+    import spark.implicits._
+    allPages.union(links.select("outlink").as[String]).distinct().count()
+  }
+
   // Count total edges (individual outlinks) in DataFrame format
   def countEdgesDF(links: DataFrame): Long = {
-    links.filter("outlink IS NOT NULL").count()
+    links.count()
+  }
+
+  // Extract all unique page names from input lines (including pages without outlinks)
+  def extractAllPagesDF(lines: Dataset[String])(implicit spark: SparkSession): Dataset[String] = {
+    import spark.implicits._
+    lines.map { line =>
+      val parts = line.split("\\|").map(_.trim)
+      parts.head // First column is always the page name
+    }.distinct()
   }
 
   // Parser version Dataset[String] → DataFrame(page, outlink)
@@ -72,7 +94,7 @@ object GraphUtils {
       val parts = line.split("\\|").map(_.trim)
       val page = parts.head
       if (parts.length > 1) parts.tail.filter(_.nonEmpty).map(out => (page, out))
-      else Seq((page, null)) // Preserve pages without outlinks with null sentinel
+      else Seq.empty[(String, String)] // Pages without outlinks are not included
     }.toDF("page", "outlink")
 
     if (debug) {

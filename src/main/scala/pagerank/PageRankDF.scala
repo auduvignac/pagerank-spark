@@ -19,22 +19,20 @@ object PageRankDF {
     def oneStep(
         v: DataFrame,
         links: DataFrame,
-        allNodes: Seq[String],
+        allNodes: Dataset[String],
         debug: Boolean = false,
         logger: Logger
     )(implicit spark: SparkSession): DataFrame = {
 
       import spark.implicits._
 
-      // === (1) Calcul du degré sortant de chaque page (ignore null outlinks) ===
+      // === (1) Calcul du degré sortant de chaque page ===
       val outDegrees = links
-        .filter("outlink IS NOT NULL")
         .groupBy($"page")
         .agg(count($"outlink").as("degree"))
 
       // === (2) Distribution du rang : chaque source envoie une contribution à ses destinations ===
       val contributionsDetailed = links
-        .filter("outlink IS NOT NULL")  // Ignore pages without outlinks
         .join(v, Seq("page"))          // (page, outlink, rank)
         .join(outDegrees, Seq("page")) // (page, outlink, rank, degree)
         .withColumn("contrib", $"rank" / $"degree")
@@ -82,6 +80,7 @@ object PageRankDF {
   // Calcul complet du PageRank sur N itérations (avec option d'historique)
   def computePageRank(
       links: DataFrame,
+      allPages: Dataset[String],
       iterations: Int,
       debug: Boolean = false,
       plot: Boolean = false,
@@ -91,15 +90,15 @@ object PageRankDF {
 
     import spark.implicits._
 
-    val allNodes = links.select("page")
-          .union(links.select("outlink").filter("outlink IS NOT NULL"))
+    // Use all source pages + all destination pages to get complete node list
+    // DS : Dataset[string]
+    val allNodesDS = allPages
+          .union(links.select("outlink").as[String])
           .distinct()
-          .as[String]
-          .collect()
-          .sorted
+          .cache()
 
-    val N = allNodes.length.toDouble
-    var v = allNodes.map(n => (n, 1.0 / N)).toSeq.toDF("page", "rank")
+    val N = allNodesDS.count().toDouble
+    var v = allNodesDS.map(n => (n, 1.0 / N)).toDF("page", "rank")
 
     // Si mode "plot" activé, conservation de l'historique
     val history =
@@ -111,7 +110,7 @@ object PageRankDF {
 
 
     for (i <- 1 to iterations) {
-      v = oneStep(v, links, allNodes, debug, logger)
+      v = oneStep(v, links, allNodesDS, debug, logger)
 
       if (debug) {
         val iterWord = if (i > 1) "itérations" else "itération"

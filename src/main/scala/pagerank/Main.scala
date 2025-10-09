@@ -52,7 +52,7 @@ object Main {
     val duration = (System.nanoTime() - start) / 1e9
     logger.info(f"==== Temps d'exécution RDD : $duration%.2f s ====")
 
-    PageRankUtils.appendBenchmark("RDD", input, iterations, v.count(), GraphUtils.countEdgesRDD(links), duration, output)
+    PageRankUtils.appendBenchmark("RDD", input, iterations, GraphUtils.countNodesRDD(links), GraphUtils.countEdgesRDD(links), duration, output)
   }
 
   /** Exécution PageRank DataFrame */
@@ -70,9 +70,11 @@ object Main {
 
     val lines = GraphUtils.readAsDataset(input)
     val links = GraphUtils.parseGraphDF(lines, debug, logger, Some(input))
+    val allPages = GraphUtils.extractAllPagesDF(lines)
 
     val v = PageRankDF.computePageRank(
       links = links,
+      allPages = allPages,
       iterations = iterations,
       debug = debug,
       plot = plot,
@@ -83,7 +85,7 @@ object Main {
     val duration = (System.nanoTime() - start) / 1e9
     logger.info(f"==== Temps d'exécution DF : $duration%.2f s ====")
 
-    PageRankUtils.appendBenchmark("DF", input, iterations, v.count(), GraphUtils.countEdgesDF(links), duration, output)
+    PageRankUtils.appendBenchmark("DF", input, iterations, GraphUtils.countNodesDF(links, allPages), GraphUtils.countEdgesDF(links), duration, output)
   }
 
   /** Exécution PageRank RDD optimisé */
@@ -114,7 +116,7 @@ object Main {
     val duration = (System.nanoTime() - start) / 1e9
     logger.info(f"==== Temps d'exécution RDD Optimisé : $duration%.2f s ====")
 
-    PageRankUtils.appendBenchmark("RDD_OPT", input, iterations, v.count(), GraphUtils.countEdgesRDD(links), duration, output)
+    PageRankUtils.appendBenchmark("RDD_OPT", input, iterations, GraphUtils.countNodesRDD(links), GraphUtils.countEdgesRDD(links), duration, output)
   }
 
   // =======================
