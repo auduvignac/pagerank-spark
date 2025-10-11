@@ -1,36 +1,45 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e  # Stop on error
 
 # =========================================================
 # Script de lancement du cluster Spark + job PageRankSpark
 # =========================================================
 
-#!/usr/bin/env bash
-set -e
-
-# Vérification du nombre minimum d’arguments
 if [ $# -lt 1 ]; then
     echo "Usage:"
-    echo "  $0 <mode> [input] [output] [iterations] [--plot] [--debug]"
-    echo "  mode ∈ {rdd, rdd-optimized, df, all, test}"
+    echo "  $0 [--mode=mode] [--input=\"file1,file2,...\"] [--output=dir] [--iteration=N] [--damping=val] [--plot] [--debug] [--build]"
+    echo "  mode ∈ {rdd, rdd_optimized, df, all, test}"
     exit 1
 fi
 
-# Valeurs par défaut
-MODE=$1
+# === Paramètres par défaut ===
+MODE="all"
 INPUT="data/sample_graph.txt"
 OUTPUT="output"
 ITER=10
+DAMPING=1.0
 PLOT=false
 DEBUG=false
 BUILD=false
 
-shift  # on enlève le mode
-
-# Parsing des arguments restants
-POSITIONAL=()
+# === Parsing des arguments ===
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --mode=*)
+        MODE="${1#*=}"
+        ;;
+        --input=*)
+        INPUT="${1#*=}"
+        ;;
+        --output=*)
+        OUTPUT="${1#*=}"
+        ;;
+        --iteration=*|--iterations=*)
+        ITER="${1#*=}"
+        ;;
+        --damping=*)
+        DAMPING="${1#*=}"
+        ;;
         --plot)
         PLOT=true
         ;;
@@ -41,16 +50,11 @@ while [[ $# -gt 0 ]]; do
         BUILD=true
         ;;
         *)
-        POSITIONAL+=("$1")
+        echo "⚠️  Argument inconnu : $1"
         ;;
     esac
     shift
 done
-
-# Affectation positionnelle
-if [ ${#POSITIONAL[@]} -ge 1 ]; then INPUT=${POSITIONAL[0]}; fi
-if [ ${#POSITIONAL[@]} -ge 2 ]; then OUTPUT=${POSITIONAL[1]}; fi
-if [ ${#POSITIONAL[@]} -ge 3 ]; then ITER=${POSITIONAL[2]}; fi
 
 # =========================================================
 # Étape 0 : Compilation du projet Scala (si build)
@@ -97,11 +101,12 @@ echo "Mode       : $MODE"
 echo "Input      : $INPUT"
 echo "Output     : $OUTPUT"
 echo "Iterations : $ITER"
+echo "Damping    : $DAMPING"
 echo "Plot       : $PLOT"
 echo "Debug      : $DEBUG"
 echo "----------------------------------------------"
 
-docker exec spark-submit /app/spark-submit.sh "$MODE" "$INPUT" "$OUTPUT" "$ITER" "$PLOT" "$DEBUG"
+docker exec spark-submit /app/spark-submit.sh "$MODE" "$INPUT" "$OUTPUT" "$ITER" "$DAMPING" "$PLOT" "$DEBUG"
 
 echo ""
 echo "📜 Logs du conteneur spark-submit :"

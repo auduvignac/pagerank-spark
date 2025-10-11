@@ -20,61 +20,66 @@ object PageRankRDD {
         v: RDD[(String, Double)],              // RDD représentant le rang actuel de chaque page : (page, rank)
         links: RDD[(String, Seq[String])],     // RDD représentant la structure du graphe : (page source, liste des pages de destination)
         allNodes: RDD[String],                 // RDD contenant la liste de toutes les pages (utile pour réintégrer celles sans contribution)
+        N: Double,                             // Nombre total de noeuds
+        damping: Double = 1.0,                 // Valeur du facteur d'amortissement (par défaut 1.0 : pas d'amortissement)
         debug: Boolean = false,                // Active ou non les logs détaillés
         logger: Logger                         // Logger pour afficher les informations de débogage
     ): RDD[(String, Double)] = {               // Retourne un nouveau RDD (page, nouveauRank)
 
-      // === (1) Distribution : chaque page "src" distribue son rang à ses destinations ===
-      val contributionsDetailed: RDD[(String, String, Double)] = links
-        .join(v) // associe chaque page source à son rang courant : (src, (outlinks, rankSrc))
-        .flatMap { case (src, (outs, rankSrc)) =>
-          if (outs.isEmpty)
-            Seq.empty[(String, String, Double)] // si la page n’a pas de liens sortants, elle ne distribue rien
-          else {
-            val share = rankSrc / outs.size      // chaque lien sortant reçoit une part égale du rang de la page source
-            outs.map(dest => (dest, src, share)) // pour chaque destination, on émet (destination, source, contribution)
-          }
-        }
-
-      // (Optionnel) Affichage des contributions détaillées en mode debug
-      if (debug) {
-        logger.debug("==== Contributions détaillées (chaque source distribue son rang) ====")
-        contributionsDetailed.collect().foreach { case (dest, src, contrib) =>
-          logger.debug(f"$dest%-5s reçoit $contrib%.6f de $src")
+    // === (1) Distribution : chaque page "src" distribue son rang à ses destinations ===
+    val contributionsDetailed: RDD[(String, String, Double)] = links
+      .join(v) // associe chaque page source à son rang courant : (src, (outlinks, rankSrc))
+      .flatMap { case (src, (outs, rankSrc)) =>
+        if (outs.isEmpty)
+          Seq.empty[(String, String, Double)] // si la page n’a pas de liens sortants, elle ne distribue rien
+        else {
+          val share = rankSrc / outs.size      // chaque lien sortant reçoit une part égale du rang de la page source
+          outs.map(dest => (dest, src, share)) // pour chaque destination, on émet (destination, source, contribution)
         }
       }
 
-      // === (2) Agrégation : chaque page "dest" reçoit la somme des contributions ===
-      val receivedRanks: RDD[(String, Double)] =
-        contributionsDetailed
-          .map { case (dest, _, contrib) => (dest, contrib) }  // on garde (destination, contribution)
-          .reduceByKey(_ + _)                                  // on additionne toutes les contributions reçues par une même page
-
-      // (Optionnel) Affichage des rangs reçus avant correction
-      if (debug) {
-        logger.debug("==== Rangs reçus (somme des contributions entrantes) ====")
-        receivedRanks.collect().foreach { case (node, rank) =>
-          logger.debug(f"$node%-5s : $rank%.6f")
-        }
+    // (Optionnel) Affichage des contributions détaillées en mode debug
+    if (debug) {
+      logger.debug("==== Contributions détaillées (chaque source distribue son rang) ====")
+      contributionsDetailed.collect().foreach { case (dest, src, contrib) =>
+        logger.debug(f"$dest%-5s reçoit $contrib%.6f de $src")
       }
-
-      // === (3) Réintégration des pages sans contribution ===
-      // Certaines pages n'apparaissent pas dans receivedRanks (aucune contribution entrante)
-      // On les ajoute avec un rang nul afin de conserver tous les nœuds du graphe
-      val nextRanks = receivedRanks
-        .union(allNodes.map(n => (n, 0.0)))  // ajoute (page, 0.0) pour les pages absentes
-        .reduceByKey(_ + _)                  // fusionne les doublons éventuels (somme inchangée)
-
-      // === (4) Retour du nouveau vecteur de rangs ===
-      // Ce RDD servira pour l’itération suivante du calcul de PageRank
-      nextRanks
     }
+
+    // === (2) Agrégation : chaque page "dest" reçoit la somme des contributions ===
+    val receivedRanks: RDD[(String, Double)] =
+      contributionsDetailed
+        .map { case (dest, _, contrib) => (dest, contrib) }  // on garde (destination, contribution)
+        .reduceByKey(_ + _)                                  // on additionne toutes les contributions reçues par une même page
+
+    // (Optionnel) Affichage des rangs reçus avant correction
+    if (debug) {
+      logger.debug("==== Rangs reçus (somme des contributions entrantes) ====")
+      receivedRanks.collect().foreach { case (node, rank) =>
+        logger.debug(f"$node%-5s : $rank%.6f")
+      }
+    }
+
+    // === (3) Réintégration des pages sans contribution ===
+    // Certaines pages n'apparaissent pas dans receivedRanks (aucune contribution entrante)
+    // On les ajoute avec un rang nul afin de conserver tous les nœuds du graphe
+    val allRanks = receivedRanks
+      .union(allNodes.map(n => (n, 0.0)))  // ajoute (page, 0.0) pour les pages absentes
+      .reduceByKey(_ + _)                  // fusionne les doublons éventuels (somme inchangée)
+
+    // === (4) Application du facteur d’amortissement ===
+    val nextRanks = allRanks.mapValues(rank => (1 - damping) / N + damping * rank)
+
+    // === (5) Retour ===
+    nextRanks
+  }
 
 
   // Calcul complet du PageRank sur N itérations (avec option d'historique)
   def computePageRank(
       links: RDD[(String, Seq[String])],
       iterations: Int,
+      damping: Double = 1.0,
       debug: Boolean = false,
       plot: Boolean = false,
       logger: Logger,
@@ -106,7 +111,7 @@ object PageRankRDD {
 
 
     for (i <- 1 to iterations) {
-      v = oneStep(v, linksFull, allNodes, debug, logger)
+      v = oneStep(v, linksFull, allNodes, N, damping, debug, logger)
 
       if (debug) {
         val iteration_str = if (i > 1) "iterations" else "iteration"

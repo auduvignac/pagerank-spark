@@ -29,6 +29,7 @@ object Main {
       input: String,
       output: String,
       iterations: Int,
+      damping: Double,
       debug: Boolean,
       plot: Boolean = false
   )(implicit spark: SparkSession): Unit = {
@@ -43,6 +44,7 @@ object Main {
     val v = PageRankRDD.computePageRank(
       links = links,
       iterations = iterations,
+      damping = damping,
       debug = debug,
       plot = plot,
       logger = logger,
@@ -60,6 +62,7 @@ object Main {
       input: String,
       output: String,
       iterations: Int,
+      damping: Double,
       debug: Boolean,
       plot: Boolean = false
   )(implicit spark: SparkSession): Unit = {
@@ -77,6 +80,7 @@ object Main {
       links = links,
       allPages = allPages,
       iterations = iterations,
+      damping = damping,
       debug = debug,
       plot = plot,
       logger = logger,
@@ -94,6 +98,7 @@ object Main {
       input: String,
       output: String,
       iterations: Int,
+      damping: Double,
       debug: Boolean,
       plot: Boolean = false
   )(implicit spark: SparkSession): Unit = {
@@ -103,25 +108,22 @@ object Main {
     val lines: RDD[String] = GraphUtils.readAsRDD(input)
     val links: RDD[(String, Seq[String])] = GraphUtils.parseGraphRDD(lines, debug, logger, Some(input))
 
-    // Precompute edge count for optimization strategy (avoids expensive count in computePageRank)
-    val edgeCount = GraphUtils.countEdgesRDD(links)
-
     val start = System.nanoTime()
 
     val v = PageRankRDDOptimized.computePageRank(
       links = links,
       iterations = iterations,
+      damping = damping,
       debug = debug,
       plot = plot,
       logger = logger,
-      outputDir = Some(output),
-      estimatedEdges = Some(edgeCount)  // Pass precomputed edge count
+      outputDir = Some(output)
     )
 
     val duration = (System.nanoTime() - start) / 1e9
     logger.info(f"==== Temps d'exécution RDD Optimisé : $duration%.2f s ====")
 
-    PageRankUtils.appendBenchmark("RDD_OPT", input, iterations, GraphUtils.countNodesRDD(links), edgeCount, duration, output)
+    PageRankUtils.appendBenchmark("RDD_OPT", input, iterations, GraphUtils.countNodesRDD(links), GraphUtils.countEdgesRDD(links), duration, output)
   }
 
   // =======================
@@ -144,6 +146,7 @@ object Main {
 
     // Valeurs par défaut
     val iterations = if (args.length > 3 && !args(3).startsWith("--")) args(3).toInt else 10
+    val damping = if (args.length > 4 && !args(4).startsWith("--")) args(4).toDouble else 1.0
     val plot       = args.contains("--plot")
     val debug      = args.contains("--debug")
 
@@ -154,6 +157,7 @@ object Main {
     logger.info(s"-> Output: $output")
     logger.info(s"-> Méthode: $method")
     logger.info(s"-> Itérations: $iterations")
+    logger.info(s"-> Facteur d'amortissement: $damping")
     logger.info(s"-> Plot: $plot")
     logger.info(s"-> Debug: $debug")
 
@@ -168,24 +172,24 @@ object Main {
 
     for (input <- inputs) {
 
-      logger.info(s"==== [Traitement du graphe] $input ====")
+      logger.info(s"==== [Traitement du graphe] [$input] [itérations : $iterations] [facteur d'amortissement : $damping] ====")
 
       try {
         method match {
           case "rdd" =>
-            computePageRankRDD(input, output, iterations, debug, plot)
+            computePageRankRDD(input, output, iterations, damping, debug, plot)
 
           case "df" =>
-            computePageRankDF(input, output, iterations, debug, plot)
+            computePageRankDF(input, output, iterations, damping, debug, plot)
 
           case "rdd_optimized" =>
-            computePageRankRDDOptimized(input, output, iterations, debug, plot)
+            computePageRankRDDOptimized(input, output, iterations, damping, debug, plot)
 
           case "all" =>
-            logger.info(s"Exécution de toutes les variantes (RDD, DF, RDD_Optimized) avec $iterations itérations")
-            computePageRankRDD(input, output, iterations, debug, plot)
-            computePageRankDF(input, output, iterations, debug, plot)
-            computePageRankRDDOptimized(input, output, iterations, debug, plot)
+            logger.info(s"Exécution de toutes les variantes (RDD, DF, RDD_Optimized) avec $iterations itérations et un facteur d'amortissement de $damping")
+            computePageRankRDD(input, output, iterations, damping, debug, plot)
+            computePageRankDF(input, output, iterations, damping, debug, plot)
+            computePageRankRDDOptimized(input, output, iterations, damping, debug, plot)
 
           case other =>
             System.err.println(s"Type d'exécution inconnu : $other")

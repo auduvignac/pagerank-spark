@@ -18,12 +18,14 @@ object PageRankRDDOptimized {
     *  - rightOuterJoin pour éviter une passe complète sur allNodes
     */
   def oneStep(
-      v: RDD[(String, Double)],
-      links: RDD[(String, Seq[String])],
-      allNodes: RDD[String],
-      debug: Boolean = false,
-      logger: Logger,
-      partitioner: Option[org.apache.spark.Partitioner] = None
+      v: RDD[(String, Double)],                                // RDD représentant le rang actuel de chaque page : (page, rank)
+      links: RDD[(String, Seq[String])],                       // RDD représentant la structure du graphe : (page source, liste des pages de destination)
+      allNodes: RDD[String],                                   // RDD contenant la liste de toutes les pages (utile pour réintégrer celles sans contribution)
+      N: Double,                                               // Nombre total de noeuds
+      damping: Double = 1.0,                                   // Valeur du facteur d'amortissement (par défaut 1.0 : pas d'amortissement)
+      debug: Boolean = false,                                  // Active ou non les logs détaillés
+      logger: Logger,                                          // Logger pour afficher les informations de débogage
+      partitioner: Option[org.apache.spark.Partitioner] = None // Activation du partitionnement
   ): RDD[(String, Double)] = {
 
     // === (1) Distribution : chaque page "src" distribue son rang à ses destinations ===
@@ -63,7 +65,7 @@ object PageRankRDDOptimized {
     }
 
     // === (3) Réintégration des pages sans contribution ===
-    val nextRanks = {
+    val allRanks = {
       val combined = receivedRanks.union(allNodes.map(n => (n, 0.0)))
       partitioner match {
         case Some(part) => combined.reduceByKey(part, _ + _)
@@ -71,6 +73,10 @@ object PageRankRDDOptimized {
       }
     }
 
+    // === (4) Application du facteur d’amortissement ===
+    val nextRanks = allRanks.mapValues(rank => (1 - damping) / N + damping * rank)
+
+    // === (5) Retour ===
     nextRanks
   }
 
@@ -81,11 +87,11 @@ object PageRankRDDOptimized {
   def computePageRank(
       links: RDD[(String, Seq[String])],
       iterations: Int,
+      damping: Double = 1.0,                 // Valeur du facteur d'amortissement (par défaut 1.0 : pas d'amortissement)
       debug: Boolean = false,
       plot: Boolean = false,
       logger: Logger,
-      outputDir: Option[String] = None,
-      estimatedEdges: Option[Long] = None  // Precomputed edge count for optimization
+      outputDir: Option[String] = None
   )(implicit spark: SparkSession): RDD[(String, Double)] = {
 
     val sc = spark.sparkContext
@@ -94,8 +100,10 @@ object PageRankRDDOptimized {
     // Strategy: RDD_OPT should dominate on MEDIUM graphs (20K-1M nodes)
     val inputPartitions = links.getNumPartitions
 
+    val edgeCount = Some(GraphUtils.countEdgesRDD(links))
+
     // Estimate graph size category from edge count (avoiding expensive count operation)
-    val estimatedNodes = estimatedEdges.getOrElse(inputPartitions * 5000L)  // Fallback: ~5K nodes per partition
+    val estimatedNodes = edgeCount.getOrElse(inputPartitions * 5000L)  // Fallback: ~5K nodes per partition
     val graphCategory = {
       if (estimatedNodes < 100000) "SMALL"         // < 100K edges (~10K nodes): RDD wins
       else if (estimatedNodes < 5000000) "MEDIUM"  // 100K-5M edges (~10K-500K nodes): RDD_OPT wins
@@ -112,7 +120,7 @@ object PageRankRDDOptimized {
       case "LARGE"  => Math.max(inputPartitions * 2, sc.defaultParallelism * 8)  // 2x input or 8x default
     }
 
-    logger.info(f"Graph category: $graphCategory, using $numPartitions partitions (input: $inputPartitions)")
+    logger.info(f"Catégorie du graph: $graphCategory, utilisation de $numPartitions partitions (input: $inputPartitions)")
     val partitioner = new HashPartitioner(numPartitions)
 
     // === (1) Préparation du graphe complet ===
@@ -159,7 +167,7 @@ object PageRankRDDOptimized {
     for (i <- 1 to iterations) {
       // For large graphs, don't pass partitioner to avoid unnecessary shuffles
       val partOpt = if (useCustomPartitioning) Some(partitioner) else None
-      val newV = oneStep(v, linksFull, allNodes, debug, logger, partOpt)
+      val newV = oneStep(v, linksFull, allNodes, N, damping, debug, logger, partOpt)
         .persist(storageLevel)
 
       v.unpersist()

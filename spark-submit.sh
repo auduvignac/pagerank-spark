@@ -14,8 +14,9 @@ MODE=$1
 INPUT=${2:-"data/sample_graph.txt"}
 OUTPUT=${3:-"output"}
 ITER=${4:-10}
-PLOT=${5:-false}
-DEBUG=${6:-false}
+DAMPING=${5:-1}
+PLOT=${6:-false}
+DEBUG=${7:-false}
 
 # --- Fichiers & configuration ---
 JAR="target/scala-2.12/pagerankspark_2.12-0.1.jar"
@@ -37,13 +38,14 @@ fi
 echo "=============================================="
 echo "🚀 Lancement PageRank ($MODE)"
 echo "----------------------------------------------"
-echo "Classe     : $MAIN_CLASS"
-echo "JAR        : $JAR"
-echo "Entrée     : $INPUT"
-echo "Sortie     : $OUTPUT"
-echo "Itérations : $ITER"
-echo "Plot       : $PLOT"
-echo "Debug      : $DEBUG"
+echo "Classe                  : $MAIN_CLASS"
+echo "JAR                     : $JAR"
+echo "Entrée                  : $INPUT"
+echo "Sortie                  : $OUTPUT"
+echo "Itérations              : $ITER"
+echo "Facteur d'amortissement : $DAMPING"
+echo "Plot                    : $PLOT"
+echo "Debug                   : $DEBUG"
 echo "=============================================="
 
 # --- Exécution Spark ---
@@ -52,7 +54,7 @@ $TIME_CMD spark-submit \
   --class "$MAIN_CLASS" \
   --conf "spark.driver.extraJavaOptions=-Dlog4j.configurationFile=$LOG_CONF" \
   --conf "spark.executor.extraJavaOptions=-Dlog4j.configurationFile=$LOG_CONF" \
-  "$JAR" "$MODE" "$INPUT" "$OUTPUT" "$ITER" \
+  "$JAR" "$MODE" "$INPUT" "$OUTPUT" "$ITER" "$DAMPING" \
   $( [ "$PLOT" == "true" ] && echo "--plot" ) \
   $( [ "$DEBUG" == "true" ] && echo "--debug" )
 
