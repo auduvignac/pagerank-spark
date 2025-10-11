@@ -28,14 +28,14 @@ def plot_benchmarks(csv_file: str, output_file: str, x_axis: str = "nodes"):
     # Palette cohérente entre les méthodes
     color_map = {
         "RDD": "#1f77b4",
-        "RDD_Optimized": "#2ca02c",
-        "DF": "#ff7f0e"
+        "RDD_OPT": "#a02c94",
+        "DF": "#ff0e0e"
     }
 
     # Noms plus clairs pour la légende
     label_map = {
         "RDD": "RDD classique",
-        "RDD_Optimized": "RDD optimisé",
+        "RDD_OPT": "RDD optimisé",
         "DF": "DataFrame"
     }
 
@@ -54,12 +54,26 @@ def plot_benchmarks(csv_file: str, output_file: str, x_axis: str = "nodes"):
         )
 
         # Affichage des valeurs au-dessus des points
-        for x, y in zip(subset[x_axis], subset["time"]):
-            plt.text(x, y + 0.1, f"{y:.2f}", ha="center", fontsize=9)
+        # for x, y in zip(subset[x_axis], subset["time"]):
+        #     plt.text(x, y + 0.1, f"{y:.2f}", ha="center", fontsize=9)
 
-    plt.xlabel("Nombre de nœuds" if x_axis == "nodes" else "Nombre d'arêtes", fontsize=12)
-    plt.ylabel("Temps d'exécution (s)", fontsize=12)
-    plt.title("Comparaison RDD / RDD optimisé / DataFrame (Spark PageRank)", fontsize=14)
+    # Personnalisation du graphique
+    # renommer les valeurs de x_axis
+    # avec rotation de 45 degrés
+    # et décalage pour éviter le chevauchement
+    if x_axis == "nodes":
+        plt.xticks(df["nodes"].unique(),
+                   df["graph"].unique(),
+                   rotation=45,
+                   ha="right")
+    else:
+        plt.xticks(df["edges"].unique(),
+                   df["graph"].unique(),
+                   rotation=45,
+                   ha="right")
+    plt.xlabel("Graphes d'étude", fontsize=12)
+    plt.ylabel("Temps d'exécution", fontsize=12)
+    #plt.title("Comparaison RDD / RDD optimisé / DataFrame (Spark PageRank)", fontsize=14)
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.6)
 
