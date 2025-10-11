@@ -33,12 +33,12 @@ object Main {
       plot: Boolean = false
   )(implicit spark: SparkSession): Unit = {
 
-    logger.info(s"==== [Traitement du graphe] [RDD] [$input] ====")
-
-    val start = System.nanoTime()
+    logger.info(s"==== [Traitement du graphe] [RDD] [$input] [$iterations itération] ====")
 
     val lines: RDD[String] = GraphUtils.readAsRDD(input)
     val links: RDD[(String, Seq[String])] = GraphUtils.parseGraphRDD(lines, debug, logger, Some(input))
+
+    val start = System.nanoTime()
 
     val v = PageRankRDD.computePageRank(
       links = links,
@@ -64,13 +64,14 @@ object Main {
       plot: Boolean = false
   )(implicit spark: SparkSession): Unit = {
 
-    logger.info(s"==== [Traitement du graphe] [DF] [$input] ====")
+    logger.info(s"==== [Traitement du graphe] [DF] [$input] [$iterations itération] ====")
 
-    val start = System.nanoTime()
 
     val lines = GraphUtils.readAsDataset(input)
     val links = GraphUtils.parseGraphDF(lines, debug, logger, Some(input))
     val allPages = GraphUtils.extractAllPagesDF(lines)
+
+    val start = System.nanoTime()
 
     val v = PageRankDF.computePageRank(
       links = links,
@@ -97,12 +98,15 @@ object Main {
       plot: Boolean = false
   )(implicit spark: SparkSession): Unit = {
 
-    logger.info(s"==== [Traitement du graphe] [RDD optimisé] [$input] ====")
-
-    val start = System.nanoTime()
+    logger.info(s"==== [Traitement du graphe] [RDD optimisé] [$input] [$iterations itération] ====")
 
     val lines: RDD[String] = GraphUtils.readAsRDD(input)
     val links: RDD[(String, Seq[String])] = GraphUtils.parseGraphRDD(lines, debug, logger, Some(input))
+
+    // Precompute edge count for optimization strategy (avoids expensive count in computePageRank)
+    val edgeCount = GraphUtils.countEdgesRDD(links)
+
+    val start = System.nanoTime()
 
     val v = PageRankRDDOptimized.computePageRank(
       links = links,
@@ -110,13 +114,14 @@ object Main {
       debug = debug,
       plot = plot,
       logger = logger,
-      outputDir = Some(output)
+      outputDir = Some(output),
+      estimatedEdges = Some(edgeCount)  // Pass precomputed edge count
     )
 
     val duration = (System.nanoTime() - start) / 1e9
     logger.info(f"==== Temps d'exécution RDD Optimisé : $duration%.2f s ====")
 
-    PageRankUtils.appendBenchmark("RDD_OPT", input, iterations, GraphUtils.countNodesRDD(links), GraphUtils.countEdgesRDD(links), duration, output)
+    PageRankUtils.appendBenchmark("RDD_OPT", input, iterations, GraphUtils.countNodesRDD(links), edgeCount, duration, output)
   }
 
   // =======================
@@ -177,7 +182,7 @@ object Main {
             computePageRankRDDOptimized(input, output, iterations, debug, plot)
 
           case "all" =>
-            logger.info("Exécution de toutes les variantes (RDD, DF, RDD_Optimized)")
+            logger.info(s"Exécution de toutes les variantes (RDD, DF, RDD_Optimized) avec $iterations itérations")
             computePageRankRDD(input, output, iterations, debug, plot)
             computePageRankDF(input, output, iterations, debug, plot)
             computePageRankRDDOptimized(input, output, iterations, debug, plot)

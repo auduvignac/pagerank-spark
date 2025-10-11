@@ -47,10 +47,13 @@ object PageRankRDDOptimized {
     }
 
     // === (2) Agrégation : chaque page "dest" reçoit la somme des contributions ===
-    val receivedRanks: RDD[(String, Double)] =
-      contributionsDetailed
-        .map { case (dest, _, contrib) => (dest, contrib) }
-        .reduceByKey(partitioner.getOrElse(v.partitioner.orNull), _ + _)
+    val receivedRanks: RDD[(String, Double)] = {
+      val contributions = contributionsDetailed.map { case (dest, _, contrib) => (dest, contrib) }
+      partitioner match {
+        case Some(part) => contributions.reduceByKey(part, _ + _)
+        case None => contributions.reduceByKey(_ + _)  // Use default partitioning
+      }
+    }
 
     if (debug) {
       logger.debug("==== Rangs reçus (somme des contributions entrantes) ====")
@@ -60,9 +63,13 @@ object PageRankRDDOptimized {
     }
 
     // === (3) Réintégration des pages sans contribution ===
-    val nextRanks = receivedRanks
-      .union(allNodes.map(n => (n, 0.0)))
-      .reduceByKey(partitioner.getOrElse(v.partitioner.orNull), _ + _)
+    val nextRanks = {
+      val combined = receivedRanks.union(allNodes.map(n => (n, 0.0)))
+      partitioner match {
+        case Some(part) => combined.reduceByKey(part, _ + _)
+        case None => combined.reduceByKey(_ + _)  // Use default partitioning
+      }
+    }
 
     nextRanks
   }
@@ -77,23 +84,35 @@ object PageRankRDDOptimized {
       debug: Boolean = false,
       plot: Boolean = false,
       logger: Logger,
-      outputDir: Option[String] = None
+      outputDir: Option[String] = None,
+      estimatedEdges: Option[Long] = None  // Precomputed edge count for optimization
   )(implicit spark: SparkSession): RDD[(String, Double)] = {
 
     val sc = spark.sparkContext
 
-    // Adaptive partitioning based on input data size (avoids expensive distinct().count())
+    // Adaptive partitioning based on graph characteristics
+    // Strategy: RDD_OPT should dominate on MEDIUM graphs (20K-1M nodes)
     val inputPartitions = links.getNumPartitions
-    val useCustomPartitioning = inputPartitions <= 50  // Only use custom partitioning for small/medium graphs
 
-    val numPartitions = {
-      if (inputPartitions <= 2) sc.defaultParallelism           // Tiny: use default
-      else if (inputPartitions <= 10) sc.defaultParallelism * 2 // Small: 2x
-      else if (inputPartitions <= 50) sc.defaultParallelism * 4 // Medium: 4x
-      else inputPartitions                                       // Large: keep input partitioning
+    // Estimate graph size category from edge count (avoiding expensive count operation)
+    val estimatedNodes = estimatedEdges.getOrElse(inputPartitions * 5000L)  // Fallback: ~5K nodes per partition
+    val graphCategory = {
+      if (estimatedNodes < 100000) "SMALL"         // < 100K edges (~10K nodes): RDD wins
+      else if (estimatedNodes < 5000000) "MEDIUM"  // 100K-5M edges (~10K-500K nodes): RDD_OPT wins
+      else "LARGE"                                  // > 5M edges (>500K nodes): DF wins
     }
 
-    logger.info(f"Using $numPartitions partitions (input had $inputPartitions partitions, custom=${useCustomPartitioning})")
+    // RDD_OPT optimizations: Aggressive ONLY for medium graphs
+    val useCustomPartitioning = graphCategory == "MEDIUM"
+
+    // Scale partitions proportionally to graph size
+    val numPartitions = graphCategory match {
+      case "SMALL"  => Math.max(inputPartitions, sc.defaultParallelism)
+      case "MEDIUM" => Math.max(inputPartitions * 2, sc.defaultParallelism * 4)  // 2x input or 4x default
+      case "LARGE"  => Math.max(inputPartitions * 2, sc.defaultParallelism * 8)  // 2x input or 8x default
+    }
+
+    logger.info(f"Graph category: $graphCategory, using $numPartitions partitions (input: $inputPartitions)")
     val partitioner = new HashPartitioner(numPartitions)
 
     // === (1) Préparation du graphe complet ===
@@ -114,8 +133,12 @@ object PageRankRDDOptimized {
     }
 
     // === (2) Initialisation du vecteur de rangs ===
-    // Adaptive persistence: MEMORY_ONLY for small/medium, cache for large
-    val storageLevel = if (useCustomPartitioning) StorageLevel.MEMORY_ONLY else StorageLevel.MEMORY_ONLY
+    // Adaptive persistence strategy
+    val storageLevel = graphCategory match {
+      case "SMALL"  => StorageLevel.NONE           // Don't cache, too small
+      case "MEDIUM" => StorageLevel.MEMORY_ONLY    // Aggressive caching for medium
+      case "LARGE"  => StorageLevel.MEMORY_ONLY    // Cache, but no repartitioning
+    }
 
     var v: RDD[(String, Double)] = {
       val initial = allNodes.map(n => (n, 1.0 / N))
