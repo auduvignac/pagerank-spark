@@ -38,7 +38,6 @@ object PageRankRDD {
         }
       }
 
-    // (Optionnel) Affichage des contributions détaillées en mode debug
     if (debug) {
       logger.debug("==== Contributions détaillées (chaque source distribue son rang) ====")
       contributionsDetailed.collect().foreach { case (dest, src, contrib) =>
@@ -47,12 +46,12 @@ object PageRankRDD {
     }
 
     // === (2) Agrégation : chaque page "dest" reçoit la somme des contributions ===
+    val reduceFunc: (Double, Double) => Double = _ + _
     val receivedRanks: RDD[(String, Double)] =
       contributionsDetailed
         .map { case (dest, _, contrib) => (dest, contrib) }  // on garde (destination, contribution)
-        .reduceByKey(_ + _)                                  // on additionne toutes les contributions reçues par une même page
+        .reduceByKey(reduceFunc)                                  // on additionne toutes les contributions reçues par une même page
 
-    // (Optionnel) Affichage des rangs reçus avant correction
     if (debug) {
       logger.debug("==== Rangs reçus (somme des contributions entrantes) ====")
       receivedRanks.collect().foreach { case (node, rank) =>
@@ -65,7 +64,7 @@ object PageRankRDD {
     // On les ajoute avec un rang nul afin de conserver tous les nœuds du graphe
     val allRanks = receivedRanks
       .union(allNodes.map(n => (n, 0.0)))  // ajoute (page, 0.0) pour les pages absentes
-      .reduceByKey(_ + _)                  // fusionne les doublons éventuels (somme inchangée)
+      .reduceByKey(reduceFunc)                  // fusionne les doublons éventuels (somme inchangée)
 
     // === (4) Application du facteur d’amortissement ===
     val nextRanks = allRanks.mapValues(rank => (1 - damping) / N + damping * rank)
@@ -90,7 +89,10 @@ object PageRankRDD {
 
     val srcNodes = links.keys
     val dstNodes = links.values.flatMap(identity)
-    val allNodes = srcNodes.union(dstNodes).distinct().cache()
+    val allNodes = srcNodes
+      .union(dstNodes)
+      .distinct()
+      .cache()
     val N = allNodes.count().toDouble
 
     val linksFull: RDD[(String, Seq[String])] = {
@@ -100,8 +102,11 @@ object PageRankRDD {
         .cache()
     }
 
-    var v: RDD[(String, Double)] = allNodes.map(n => (n, 1.0 / N))
+    // === (2) Initialisation du vecteur de rangs ===
+    var v = allNodes
+      .map(n => (n, 1.0 / N))
 
+    // Historique optionnel
     val history =
       if (plot) {
         val buf = scala.collection.mutable.ArrayBuffer.empty[Map[String, Double]]
@@ -109,7 +114,7 @@ object PageRankRDD {
         Some(buf)
       } else None
 
-
+    // === (3) Boucle principale ===
     for (i <- 1 to iterations) {
       v = oneStep(v, linksFull, allNodes, N, damping, debug, logger)
 
@@ -125,7 +130,7 @@ object PageRankRDD {
         PageRankUtils.appendSnapshot(history, v)
     }
 
-    // Export CSV si demandé
+    // === (4) Export CSV ===
     if (plot && outputDir.isDefined) {
       PageRankUtils.exportHistoryToCSV(history.get.toSeq, outputDir.get, logger)
     }

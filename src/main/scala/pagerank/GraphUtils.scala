@@ -105,4 +105,24 @@ object GraphUtils {
 
     df
   }
+
+  def NumPartitions(nodeCount: Long)(implicit spark: SparkSession): Int = {
+    val cores = spark.sparkContext.defaultParallelism
+
+    // Heuristique de base selon la taille du graphe
+    val base =
+      if (nodeCount < 100000) cores * 2
+      else if (nodeCount < 1000000) cores * 4
+      else if (nodeCount < 10000000) cores * 8
+      else math.min((nodeCount / 100000).toInt, 2048)
+
+    // Bornes minimales et maximales de sécurité
+    val rawPartitions = math.max(base, cores)
+
+    val nextPow2 = Integer.highestOneBit(rawPartitions - 1) * 2
+
+    nextPow2
+  }
+
+
 }
