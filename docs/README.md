@@ -34,3 +34,32 @@ Après s’être positionné dans le répertoire principal du projet (par défau
 | `--build` | *(optionnel)* | Force la recompilation du projet Scala via `sbt clean package` avant l’exécution. |
 | `--debug` | *(optionnel)* | Active les logs détaillés d’exécution (utile pour le suivi du calcul). |
 | `--plot` | *(optionnel)* | Génère la courbe d'évolution de la probabilité de position (si la fonctionnalité de visualisation est activée).
+
+### Exécution complète du benchmark
+
+Depuis la racine du projet, exécuter simplement :
+
+```bash
+./benchmark.sh
+```
+
+Le script lance automatiquement les expériences pour toutes les combinaisons de paramètres prédéfinis.
+
+- Itérations :
+  `{10, 20, 50, 100}`
+
+- Partitions :
+  `{16, 32, 64, 128, 256, 512, 1024}`
+
+Le script exécute automatiquement le programme pour chaque combinaison d’**itérations** et de **partitions**,
+en sauvegardant les résultats dans une arborescence structurée sous `output/`.
+
+Chaque exécution génère un répertoire `output/all/iterations_N/damping_0_85/partitions_M` avec : 
+- `N` : le nombre d'itérations ;
+- `M` : le nombre partitions.
+
+Ces répertoires contiennent deux fichiers :
+- `benchmark.csv` : temps d'exécution de chaque structure avec l'ensemble des graphes ;
+- `benchmark.png` : représentation graphique de `benchmark.csv`.
+
+
