@@ -16,8 +16,9 @@ OUTPUT=${3:-"output"}
 ITER=${4:-10}
 DAMPING=${5:-1}
 PARTITIONS=${6:-128}
-PLOT=${7:-false}
-DEBUG=${8:-false}
+STORAGE=${7:-"MEMORY_ONLY"}
+PLOT=${8:-false}
+DEBUG=${9:-false}
 
 # --- Fichiers & configuration ---
 JAR="target/scala-2.12/pagerankspark_2.12-0.1.jar"
@@ -46,6 +47,7 @@ echo "Sortie                  : $OUTPUT"
 echo "Itérations              : $ITER"
 echo "Facteur d'amortissement : $DAMPING"
 echo "Nombre de partitions    : $PARTITIONS"
+echo "Stockage                : $STORAGE"
 echo "Plot                    : $PLOT"
 echo "Debug                   : $DEBUG"
 echo "=============================================="
@@ -56,7 +58,7 @@ $TIME_CMD spark-submit \
   --class "$MAIN_CLASS" \
   --conf "spark.driver.extraJavaOptions=-Dlog4j.configurationFile=$LOG_CONF" \
   --conf "spark.executor.extraJavaOptions=-Dlog4j.configurationFile=$LOG_CONF" \
-  "$JAR" "$MODE" "$INPUT" "$OUTPUT" "$ITER" "$DAMPING" "$PARTITIONS" \
+  "$JAR" "$MODE" "$INPUT" "$OUTPUT" "$ITER" "$DAMPING" "$PARTITIONS" "$STORAGE" \
   $( [ "$PLOT" == "true" ] && echo "--plot" ) \
   $( [ "$DEBUG" == "true" ] && echo "--debug" )
 

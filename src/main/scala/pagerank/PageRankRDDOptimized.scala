@@ -81,6 +81,7 @@ object PageRankRDDOptimized {
       iterations: Int,
       damping: Double = 1.0,
       partitioner: Partitioner,
+      storage: String,
       debug: Boolean = false,
       plot: Boolean = false,
       logger: Logger,
@@ -101,20 +102,20 @@ object PageRankRDDOptimized {
         .leftOuterJoin(links)
         .mapValues { case (_, maybeOuts) => maybeOuts.getOrElse(Seq.empty[String]) }
         .partitionBy(partitioner) // une seule fois
-        .persist(StorageLevel.MEMORY_AND_DISK)
+        .persist(storageLevelOf(storage))
     }
 
     val allNodesZero: RDD[(String, Double)] =
       allNodes
         .map(n => (n, 0.0))
         .partitionBy(partitioner)
-        .persist(StorageLevel.MEMORY_ONLY)
+        .persist(storageLevelOf(storage))
 
     // === (2) Initialisation du vecteur de rangs ===
     var v: RDD[(String, Double)] = allNodes
       .map(n => (n, 1.0 / N))
       .partitionBy(partitioner)
-      .persist(StorageLevel.MEMORY_ONLY)
+      .persist(storageLevelOf(storage))
 
     // Historique optionnel (pour le plot)
     val history =
@@ -127,7 +128,7 @@ object PageRankRDDOptimized {
     // === (3) Boucle principale ===
     for (i <- 1 to iterations) {
       val newV = oneStep(v, linksFull, allNodesZero, N, damping, partitioner, debug, logger)
-        .persist(StorageLevel.MEMORY_ONLY)
+        .persist(storageLevelOf(storage))
 
       // libère l’ancienne version toutes les 5 itérations pour éviter la surcharge mémoire
       if (i % 5 == 0 || i == iterations) v.unpersist(blocking = false)
@@ -153,4 +154,15 @@ object PageRankRDDOptimized {
 
     v
   }
+
+  def storageLevelOf(name: String): StorageLevel =
+    name.toUpperCase match {
+      case "MEMORY_ONLY"         => StorageLevel.MEMORY_ONLY
+      case "MEMORY_ONLY_SER"     => StorageLevel.MEMORY_ONLY_SER
+      case "MEMORY_AND_DISK"     => StorageLevel.MEMORY_AND_DISK
+      case "MEMORY_AND_DISK_SER" => StorageLevel.MEMORY_AND_DISK_SER
+      case "DISK_ONLY"           => StorageLevel.DISK_ONLY
+      case _                     => StorageLevel.MEMORY_ONLY
+    }
+
 }

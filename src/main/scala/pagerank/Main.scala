@@ -103,6 +103,7 @@ object Main {
       iterations: Int,
       damping: Double,
       numpartitions: Int,
+      storage: String,
       debug: Boolean,
       plot: Boolean = false
   )(implicit spark: SparkSession, logger: Logger): Unit = {
@@ -125,6 +126,7 @@ object Main {
       iterations = iterations,
       damping = damping,
       partitioner = partitioner,
+      storage = storage,
       debug = debug,
       plot = plot,
       logger = logger,
@@ -159,6 +161,7 @@ object Main {
     val iterations  = if (args.length > 3 && !args(3).startsWith("--")) args(3).toInt else 10
     val damping     = if (args.length > 4 && !args(4).startsWith("--")) args(4).toDouble else 1.0
     val partitions  = if (args.length > 5 && !args(5).startsWith("--")) args(5).toInt else 128
+    val storage     = if (args.length > 6 && !args(6).startsWith("--")) args(6) else "MEMORY_ONLY"
     val plot        = args.contains("--plot")
     val debug       = args.contains("--debug")
 
@@ -171,6 +174,7 @@ object Main {
     logger.info(s"-> Itérations: $iterations")
     logger.info(s"-> Facteur d'amortissement: $damping")
     logger.info(s"-> Nombre de partitions: $partitions")
+    logger.info(s"-> Type de stockage: $storage")
     logger.info(s"-> Plot: $plot")
     logger.info(s"-> Debug: $debug")
 
@@ -178,34 +182,8 @@ object Main {
     // pour en générer une boucle
     val paths = input.split(",").toList
 
-    // Initialisation Spark
-    // implicit val spark: SparkSession = SparkSession.builder
-    //   .appName(s"PageRank-$method")
-    //   .master("local[*]")
-    //   // Fixe le parallélisme de base
-    //   .config("spark.default.parallelism", "4")
-    //   // Désactive les heuristiques de shuffle adaptatif
-    //   .config("spark.sql.adaptive.enabled", "false")
-    //   .config("spark.shuffle.reduceLocality.enabled", "false")
-    //   .config("spark.shuffle.compress", "false")
-    //   .config("spark.shuffle.spill.compress", "false")
-    //   .getOrCreate()
     implicit val spark: SparkSession = SparkSession.builder()
       .appName(s"PageRank-$method")
-      .master("local[*]")
-      // Réduit le parallélisme global
-      .config("spark.default.parallelism", "4")
-      // Réduit la parallélisation des shuffles
-      .config("spark.sql.shuffle.partitions", "4")
-      // Désactive les optimisations adaptatives
-      .config("spark.sql.adaptive.enabled", "false")
-      .config("spark.shuffle.reduceLocality.enabled", "false")
-      // Ralentit un peu le shuffle (moins de buffer, pas de compression)
-      .config("spark.shuffle.file.buffer", "32k")
-      .config("spark.shuffle.compress", "false")
-      .config("spark.shuffle.spill.compress", "false")
-      // Réduit la taille max des transferts shuffle (augmente la latence)
-      .config("spark.reducer.maxSizeInFlight", "24m")
       .getOrCreate()
 
     for (path <- paths) {
@@ -247,7 +225,7 @@ object Main {
             dfgraph.allPages.unpersist(blocking = true)
             System.gc()
             val rddoptmizedgraph = new GraphRDD(s"Graph-RDD-Optimized-$fileName", path, debug)
-            computePageRankRDDOptimized(rddoptmizedgraph, output, iterations, damping, partitions, debug, plot)
+            computePageRankRDDOptimized(rddoptmizedgraph, output, iterations, damping, partitions, storage, debug, plot)
             rddoptmizedgraph.links.unpersist(blocking = true)
             System.gc()
 
