@@ -1,168 +1,156 @@
 package pagerank
 
 import org.apache.log4j.Logger
+import org.apache.spark.HashPartitioner
 import org.apache.spark.rdd.RDD
-import org.apache.spark.Partitioner
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
 
+/**
+  * Implémentation optimisée du PageRank RDD :
+  *  - utilisation d’un HashPartitioner partagé
+  *  - limitation des shuffles (reduceByKey avec partitioner)
+  *  - persistences contrôlées
+  *  - prise en compte de la masse pendante
+  *  - option plot/export comme PageRankRDD
+  */
 object PageRankRDDOptimized {
 
-  /**
-    * Effectue une itération du calcul PageRank optimisé :
-    * v_{i+1} = M × v_i
-    *
-    * Optimisations :
-    *  - co-partitionnement entre links, v et allNodes
-    *  - réduction du volume shufflé (on ne transporte plus la source)
-    *  - rightOuterJoin pour réintégrer les pages sans contribution
-    */
-  def oneStep(
-      v: RDD[(String, Double)],              // vecteur de rangs actuel (page -> rank)
-      links: RDD[(String, Seq[String])],     // graphe des liens sortants (page source -> destinations)
-      allNodesZero: RDD[(String, Double)],   // RDD de toutes les pages avec rang 0 (co-partitionné)
-      N: Double,                             // nombre total de noeuds
-      damping: Double = 1.0,                 // facteur d'amortissement
-      partitioner: Partitioner,              // partitionneur partagé
-      debug: Boolean = false,                // logs détaillés
-      logger: Logger                         // logger
+  // =========================================================================
+  // (1) Étape élémentaire du calcul PageRank partitionné
+  // =========================================================================
+  def oneStepPartitioned(
+      ranks: RDD[(String, Double)],
+      nodesWithEmpty: RDD[(String, (Int, Array[String]))],
+      N: Double,
+      beta: Double,
+      partitioner: HashPartitioner,
+      debug: Boolean,
+      logger: Logger
   ): RDD[(String, Double)] = {
 
-    // === (1) Distribution : chaque page "src" distribue son rang à ses destinations ===
-    val contributions: RDD[(String, Double)] = links
-      .join(v, partitioner) // jointure co-partitionnée
-      .flatMap { case (_, (outs, rankSrc)) =>
-        if (outs.isEmpty) Iterator.empty
-        else {
-          val share = rankSrc / outs.size
-          outs.iterator.map(dest => (dest, share))
-        }
+    import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
+
+    // (1) Calcul des contributions
+    val contribs = nodesWithEmpty
+      .join(ranks)
+      .flatMap { case (_, ((deg, outs), rank)) =>
+        if (deg == 0) Iterator.empty
+        else outs.iterator.map(dest => (dest, rank / deg))
       }
+      .reduceByKey(partitioner, _ + _)
 
-    // === (2) Agrégation : chaque page "dest" reçoit la somme des contributions ===
-    val reduceFunc: (Double, Double) => Double = _ + _
-    val receivedRanks: RDD[(String, Double)] =
-      contributions.reduceByKey(partitioner, reduceFunc)
-
-    // === (3) Réintégration des pages sans contribution ===
-    val allRanks: RDD[(String, Double)] =
-      receivedRanks
-        .rightOuterJoin(allNodesZero, partitioner)
-        .mapValues { case (maybeSum, _) => maybeSum.getOrElse(0.0) }
-
-    // === (4) Application du facteur d’amortissement ===
-    val nextRanks: RDD[(String, Double)] =
-      allRanks.mapValues(rank => (1 - damping) / N + damping * rank)
-
-    if (debug) {
-      logger.debug("==== Rangs mis à jour après itération ====")
-      nextRanks.take(20).foreach { case (node, rank) =>
-        logger.debug(f"$node%-5s : $rank%.6f")
-      }
+    // (2) Ajout de baseRDD (valeurs par défaut) et somme
+    val baseRDD = ranks.mapValues(_ => (1.0 - beta) / N)
+    val next = baseRDD.leftOuterJoin(contribs).mapValues {
+      case (b, optC) => b + beta * optC.getOrElse(0.0)
     }
 
-    nextRanks
+    if (debug) {
+      logger.debug("[oneStepPartitioned] Exemple de rangs :")
+      next.take(10).foreach { case (p, r) => logger.debug(f"$p%-20s => $r%.6f") }
+    }
+
+    next
   }
 
-  /**
-    * Calcul complet du PageRank optimisé sur N itérations
-    *
-    * @param links       graphe des liens sortants
-    * @param iterations  nombre d’itérations à exécuter
-    * @param damping     facteur d’amortissement
-    * @param partitioner partitionneur utilisé pour toutes les jointures
-    * @param debug       active les logs détaillés
-    * @param plot        génère un historique pour affichage
-    * @param logger      logger
-    * @param outputDir   dossier de sortie optionnel
-    */
+  // =========================================================================
+  // (2) Calcul complet du PageRank optimisé
+  // =========================================================================
   def computePageRank(
       links: RDD[(String, Seq[String])],
       iterations: Int,
-      damping: Double = 1.0,
-      partitioner: Partitioner,
-      storage: String,
+      beta: Double = 0.85,
       debug: Boolean = false,
       plot: Boolean = false,
       logger: Logger,
-      outputDir: Option[String] = None
+      storage: StorageLevel = StorageLevel.MEMORY_AND_DISK_SER,
+      outputDir: String = "",
+      numParts: Int = 0
   )(implicit spark: SparkSession): RDD[(String, Double)] = {
 
+    import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
     val sc = spark.sparkContext
 
-    // === (1) Préparation du graphe complet (co-partitionné) ===
-    val srcNodes = links.keys
-    val dstNodes = links.values.flatMap(identity)
-    val allNodes = srcNodes.union(dstNodes).distinct().cache()
+    // (0) Partitionner et préparer le graphe
+    val P = new HashPartitioner(if (numParts > 0) numParts else sc.defaultParallelism * 2)
+
+    logger.info(s"[PageRankRDDOptimized] Initialisation ($iterations itérations, β=$beta, parts=${P.numPartitions})")
+
+    val sources = links.keys
+    val dests   = links.values.flatMap(identity)
+    val allNodes = (sources union dests).distinct().persist(storage)
     val N = allNodes.count().toDouble
 
-    val linksFull: RDD[(String, Seq[String])] = {
-      val emptyByNode = allNodes.map(n => (n, Seq.empty[String]))
-      emptyByNode
-        .leftOuterJoin(links)
-        .mapValues { case (_, maybeOuts) => maybeOuts.getOrElse(Seq.empty[String]) }
-        .partitionBy(partitioner) // une seule fois
-        .persist(storageLevelOf(storage))
-    }
+    // === Structure partitionnée du graphe ===
+    val outMap = links
+      .reduceByKey(P, _ ++ _)
+      .mapValues(_.distinct.toArray)
+      .mapValues(arr => (arr.length, arr))
+      .partitionBy(P)
+      .persist(storage)
 
-    val allNodesZero: RDD[(String, Double)] =
-      allNodes
-        .map(n => (n, 0.0))
-        .partitionBy(partitioner)
-        .persist(storageLevelOf(storage))
+    val nodesWithEmpty = allNodes
+      .map(id => (id, (0, Array.empty[String])))
+      .partitionBy(P)
+      .leftOuterJoin(outMap)
+      .mapValues {
+        case ((_, _), Some((deg, outs))) => (deg, outs)
+        case _                           => (0, Array.empty[String])
+      }
+      .persist(storage)
 
-    // === (2) Initialisation du vecteur de rangs ===
-    var v: RDD[(String, Double)] = allNodes
-      .map(n => (n, 1.0 / N))
-      .partitionBy(partitioner)
-      .persist(storageLevelOf(storage))
+    // === Initialisation du vecteur de rangs ===
+    var ranks = allNodes.map(id => (id, 1.0 / N)).partitionBy(P).persist(storage)
 
-    // Historique optionnel (pour le plot)
+    // === Historique (si plot) ===
     val history =
       if (plot) {
         val buf = scala.collection.mutable.ArrayBuffer.empty[Map[String, Double]]
-        PageRankUtils.appendSnapshot(Some(buf), v)
+        PageRankUtils.appendSnapshot(Some(buf), ranks)
         Some(buf)
       } else None
 
-    // === (3) Boucle principale ===
+    // === Boucle d’itérations ===
     for (i <- 1 to iterations) {
-      val newV = oneStep(v, linksFull, allNodesZero, N, damping, partitioner, debug, logger)
-        .persist(storageLevelOf(storage))
+      if (debug) logger.info(s"[PageRankRDDOptimized] --- Itération $i/$iterations ---")
 
-      // libère l’ancienne version toutes les 5 itérations pour éviter la surcharge mémoire
-      if (i % 5 == 0 || i == iterations) v.unpersist(blocking = false)
+      // (a) Masse pendante
+      val danglingMass = nodesWithEmpty.join(ranks)
+        .filter { case (_, ((deg, _), _)) => deg == 0 }
+        .map { case (_, ((_, _), r)) => r }
+        .sum()
 
-      v = newV
+      // (b) Étape principale
+      var newRanks = oneStepPartitioned(ranks, nodesWithEmpty, N, beta, P, debug, logger)
 
-      if (debug) {
-        val iteration_str = if (i > 1) "itérations" else "itération"
-        logger.debug(s"==== Nouveau vecteur après $i $iteration_str ====")
-        v.take(20).foreach { case (node, rank) =>
-          logger.debug(f"$node%-5s : $rank%.6f")
-        }
-      }
+      // (c) Redistribution de la masse pendante
+      val redistribution = beta * danglingMass / N
+      newRanks = newRanks.mapValues(_ + redistribution).partitionBy(P).persist(storage)
 
+      // (d) Normalisation
+      val sumRanks = newRanks.values.sum()
+      ranks.unpersist(false)
+      ranks = newRanks.mapValues(_ / sumRanks).partitionBy(P).persist(storage)
+
+      // (e) Ajout au plot
       if (plot)
-        PageRankUtils.appendSnapshot(history, v)
+        PageRankUtils.appendSnapshot(history, ranks)
+
+      if (debug)
+        logger.info(f"[PageRankRDDOptimized] Itération $i terminée (somme=$sumRanks%.6f)")
     }
 
-    // === (4) Export CSV si demandé ===
-    if (plot && outputDir.isDefined) {
-      PageRankUtils.exportHistoryToCSV(history.get.toSeq, outputDir.get, logger)
-    }
+    logger.info("[PageRankRDDOptimized] Calcul PageRank terminé ✅")
 
-    v
+    // (f) Export CSV
+    if (plot && outputDir.nonEmpty)
+      PageRankUtils.exportHistoryToCSV(history.get.toSeq, outputDir, logger)
+
+    // nettoyage
+    nodesWithEmpty.unpersist(false)
+    allNodes.unpersist(false)
+
+    ranks
   }
-
-  def storageLevelOf(name: String): StorageLevel =
-    name.toUpperCase match {
-      case "MEMORY_ONLY"         => StorageLevel.MEMORY_ONLY
-      case "MEMORY_ONLY_SER"     => StorageLevel.MEMORY_ONLY_SER
-      case "MEMORY_AND_DISK"     => StorageLevel.MEMORY_AND_DISK
-      case "MEMORY_AND_DISK_SER" => StorageLevel.MEMORY_AND_DISK_SER
-      case "DISK_ONLY"           => StorageLevel.DISK_ONLY
-      case _                     => StorageLevel.MEMORY_ONLY
-    }
-
 }

@@ -2,6 +2,7 @@ package pagerank
 
 import java.io.{File, BufferedWriter, FileWriter, PrintWriter}
 import org.apache.log4j.Logger
+import org.apache.spark.storage.StorageLevel
 
 object PageRankUtils {
 
@@ -86,5 +87,15 @@ object PageRankUtils {
     }
     logger.info(f"==== Fichier benchmark exporté : $file ====")
   }
+
+  def storageLevelOf(name: String): StorageLevel =
+    name.toUpperCase match {
+      case "MEMORY_ONLY"         => StorageLevel.MEMORY_ONLY
+      case "MEMORY_ONLY_SER"     => StorageLevel.MEMORY_ONLY_SER
+      case "MEMORY_AND_DISK"     => StorageLevel.MEMORY_AND_DISK
+      case "MEMORY_AND_DISK_SER" => StorageLevel.MEMORY_AND_DISK_SER
+      case "DISK_ONLY"           => StorageLevel.DISK_ONLY
+      case _                     => StorageLevel.MEMORY_ONLY
+    }
 
 }

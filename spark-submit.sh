@@ -53,14 +53,22 @@ echo "Debug                   : $DEBUG"
 echo "=============================================="
 
 # --- Exécution Spark ---
-$TIME_CMD spark-submit \
-  --master local[*] \
+spark-submit \
   --class "$MAIN_CLASS" \
-  --conf "spark.driver.extraJavaOptions=-Dlog4j.configurationFile=$LOG_CONF" \
-  --conf "spark.executor.extraJavaOptions=-Dlog4j.configurationFile=$LOG_CONF" \
+  --master local[*] \
+  --driver-memory 16G \
+  --executor-memory 16G \
+  --conf "spark.memory.fraction=0.7" \
+  --conf "spark.memory.storageFraction=0.3" \
+  --conf "spark.shuffle.spill=true" \
+  --conf "spark.sql.shuffle.partitions=2000" \
+  --conf "spark.driver.extraJavaOptions=-Dfile.encoding=UTF-8 -Dlog4j.configurationFile=$LOG_CONF" \
+  --conf "spark.executor.extraJavaOptions=-Dfile.encoding=UTF-8 -Dlog4j.configurationFile=$LOG_CONF" \
   "$JAR" "$MODE" "$INPUT" "$OUTPUT" "$ITER" "$DAMPING" "$PARTITIONS" "$STORAGE" \
   $( [ "$PLOT" == "true" ] && echo "--plot" ) \
   $( [ "$DEBUG" == "true" ] && echo "--debug" )
+
+
 
 # --- Tracé du PageRank optionnel ---
 echo "📈 Tracé des résultats du benchmark..."
