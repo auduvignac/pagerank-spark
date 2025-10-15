@@ -56,8 +56,8 @@ echo "=============================================="
 $TIME_CMD spark-submit \
   --master local[*] \
   --class "$MAIN_CLASS" \
-  --conf "spark.driver.extraJavaOptions=-Dlog4j.configurationFile=$LOG_CONF" \
-  --conf "spark.executor.extraJavaOptions=-Dlog4j.configurationFile=$LOG_CONF" \
+  --conf "spark.driver.extraJavaOptions=-Dfile.encoding=UTF-8 -Dlog4j.configurationFile=$LOG_CONF" \
+  --conf "spark.executor.extraJavaOptions=-Dfile.encoding=UTF-8 -Dlog4j.configurationFile=$LOG_CONF" \
   "$JAR" "$MODE" "$INPUT" "$OUTPUT" "$ITER" "$DAMPING" "$PARTITIONS" "$STORAGE" \
   $( [ "$PLOT" == "true" ] && echo "--plot" ) \
   $( [ "$DEBUG" == "true" ] && echo "--debug" )
