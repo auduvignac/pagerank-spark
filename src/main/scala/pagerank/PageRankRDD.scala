@@ -10,73 +10,38 @@ object PageRankRDD {
     * Effectue une itération du calcul PageRank :
     * v_{i+1} = M × v_i
     *
-    * @param v         vecteur de rangs actuel (page -> rank)
+    * @param ranks     vecteur de rangs actuel (page -> rank)
     * @param links     graphe des liens sortants (page -> outlinks)
     * @param allNodes  ensemble de toutes les pages
     * @param debug     booleen pour afficher les messages de debug
     * @param logger    logger permettant d'afficher les messages de log
     */
     def oneStep(
-        v: RDD[(String, Double)],              // RDD représentant le rang actuel de chaque page : (page, rank)
-        links: RDD[(String, Seq[String])],     // RDD représentant la structure du graphe : (page source, liste des pages de destination)
-        allNodes: RDD[String],                 // RDD contenant la liste de toutes les pages (utile pour réintégrer celles sans contribution)
-        N: Double,                             // Nombre total de noeuds
-        damping: Double = 1.0,                 // Valeur du facteur d'amortissement (par défaut 1.0 : pas d'amortissement)
-        debug: Boolean = false,                // Active ou non les logs détaillés
-        logger: Logger                         // Logger pour afficher les informations de débogage
-    ): RDD[(String, Double)] = {               // Retourne un nouveau RDD (page, nouveauRank)
+        ranks: RDD[(String, Double)],
+        links: RDD[(String, Seq[String])],
+        N: Double,
+        damping: Double = 1.0,
+        debug: Boolean = false,
+        logger: Logger,
+    ): RDD[(String, Double)] = {
 
-    // === (1) Distribution : chaque page "src" distribue son rang à ses destinations ===
-    val contributionsDetailed: RDD[(String, String, Double)] = links
-      .join(v) // associe chaque page source à son rang courant : (src, (outlinks, rankSrc))
-      .flatMap { case (src, (outs, rankSrc)) =>
-        if (outs.isEmpty)
-          Seq.empty[(String, String, Double)] // si la page n’a pas de liens sortants, elle ne distribue rien
-        else {
-          val share = rankSrc / outs.size      // chaque lien sortant reçoit une part égale du rang de la page source
-          outs.map(dest => (dest, src, share)) // pour chaque destination, on émet (destination, source, contribution)
-        }
+    // === Distribution : chaque page "src" distribue son rang à ses destinations ===
+    val contributions = links.join(ranks).values.flatMap{ case (links, rank) =>
+        val size = links.size
+        links.map(url => (url, rank / size))
       }
 
-    if (debug) {
-      logger.debug("==== Contributions détaillées (chaque source distribue son rang) ====")
-      contributionsDetailed.collect().foreach { case (dest, src, contrib) =>
-        logger.debug(f"$dest%-5s reçoit $contrib%.6f de $src")
-      }
-    }
+    // === Agrégation : chaque page "dest" reçoit la somme des contributions ===
+    val nextranks = contributions
+      .reduceByKey(_ + _)
+      .mapValues(rank => (1 - damping) / N + damping * rank)
 
-    // === (2) Agrégation : chaque page "dest" reçoit la somme des contributions ===
-    val reduceFunc: (Double, Double) => Double = _ + _
-    val receivedRanks: RDD[(String, Double)] =
-      contributionsDetailed
-        .map { case (dest, _, contrib) => (dest, contrib) }  // on garde (destination, contribution)
-        .reduceByKey(reduceFunc)                                  // on additionne toutes les contributions reçues par une même page
-
-    if (debug) {
-      logger.debug("==== Rangs reçus (somme des contributions entrantes) ====")
-      receivedRanks.collect().foreach { case (node, rank) =>
-        logger.debug(f"$node%-5s : $rank%.6f")
-      }
-    }
-
-    // === (3) Réintégration des pages sans contribution ===
-    // Certaines pages n'apparaissent pas dans receivedRanks (aucune contribution entrante)
-    // On les ajoute avec un rang nul afin de conserver tous les nœuds du graphe
-    val allRanks = receivedRanks
-      .union(allNodes.map(n => (n, 0.0)))  // ajoute (page, 0.0) pour les pages absentes
-      .reduceByKey(reduceFunc)                  // fusionne les doublons éventuels (somme inchangée)
-
-    // === (4) Application du facteur d’amortissement ===
-    val nextRanks = allRanks.mapValues(rank => (1 - damping) / N + damping * rank)
-
-    // === (5) Retour ===
-    nextRanks
+    // === Retour
+    nextranks
   }
 
-
-  // Calcul complet du PageRank sur N itérations (avec option d'historique)
   def computePageRank(
-      links: RDD[(String, Seq[String])],
+      graph: GraphRDD,
       iterations: Int,
       damping: Double = 1.0,
       debug: Boolean = false,
@@ -87,55 +52,51 @@ object PageRankRDD {
 
     val sc = spark.sparkContext
 
-    val srcNodes = links.keys
-    val dstNodes = links.values.flatMap(identity)
-    val allNodes = srcNodes
-      .union(dstNodes)
-      .distinct()
-      .cache()
-    val N = allNodes.count().toDouble
+    val N: Double = graph.nNodes.toDouble
+    val allNodes: RDD[String] = graph.allNodes
+    val links: RDD[(String, Seq[String])] = graph.links
 
-    val linksFull: RDD[(String, Seq[String])] = {
-      val emptyByNode = allNodes.map(n => (n, Seq.empty[String]))
-      emptyByNode.leftOuterJoin(links)
-        .mapValues { case (_, maybeOuts) => maybeOuts.getOrElse(Seq.empty[String]) }
-        .cache()
-    }
-
-    // === (2) Initialisation du vecteur de rangs ===
-    var v = allNodes
+    // === Initialisation du vecteur de rangs ===
+    var ranks: RDD[(String, Double)] = allNodes
       .map(n => (n, 1.0 / N))
 
     // Historique optionnel
     val history =
       if (plot) {
         val buf = scala.collection.mutable.ArrayBuffer.empty[Map[String, Double]]
-        PageRankUtils.appendSnapshot(Some(buf), v)
+        PageRankUtils.appendSnapshot(Some(buf), ranks)
         Some(buf)
       } else None
 
-    // === (3) Boucle principale ===
     for (i <- 1 to iterations) {
-      v = oneStep(v, linksFull, allNodes, N, damping, debug, logger)
+      ranks = oneStep(
+        ranks = ranks,
+        links = links,
+        N = N,
+        damping = damping,
+        debug = debug,
+        logger = logger
+      )
 
       if (debug) {
-        val iteration_str = if (i > 1) "iterations" else "iteration"
-        logger.debug(s"==== Nouveau vecteur après $i $iteration_str ====")
-        v.collect().foreach { case (node, rank) =>
+        val iterWord = if (i > 1) "iterations" else "iteration"
+        logger.debug(s"==== Nouveau vecteur après $i $iterWord ====")
+        ranks.collect().foreach { case (node, rank) =>
           logger.debug(f"$node%-5s : $rank%.6f")
         }
       }
 
-      if (plot)
-        PageRankUtils.appendSnapshot(history, v)
+      if (plot) {
+        PageRankUtils.appendSnapshot(history, ranks)
+      }
+
     }
 
-    // === (4) Export CSV ===
     if (plot && outputDir.isDefined) {
       PageRankUtils.exportHistoryToCSV(history.get.toSeq, outputDir.get, logger)
     }
 
-    v
+    ranks
   }
 
 }
