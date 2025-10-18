@@ -134,7 +134,7 @@ object Main {
       plot = plot,
       logger = logger,
       outputDir = Some(output),
-      partitioner = partitioner,
+      partitioner = Some(partitioner),
       storage = PageRankUtils.storageLevelOf(storage)
     )
 
