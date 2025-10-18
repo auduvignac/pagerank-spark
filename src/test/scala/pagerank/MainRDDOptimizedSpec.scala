@@ -3,6 +3,11 @@ package pagerank
 import org.scalatest.funsuite.AnyFunSuite
 import org.apache.spark.rdd.RDD
 import org.apache.log4j.Logger
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.Partitioner
+import org.apache.spark.storage.StorageLevel
+import org.apache.spark.HashPartitioner
+
 import utils.SparkTestSession
 
 class MainRDDOptimizedSpec extends AnyFunSuite with SparkTestSession {
@@ -20,22 +25,43 @@ class MainRDDOptimizedSpec extends AnyFunSuite with SparkTestSession {
 
   test("oneStep keeps invariants on sample_graph.txt") {
 
+    val P = new HashPartitioner(sc.defaultParallelism * 2)
+
     val N: Double = graph.nNodes.toDouble
-    val allNodes: RDD[String] = graph.allNodes
+    val allNodes: RDD[String] = graph.allNodes.persist(StorageLevel.MEMORY_ONLY)
     val links: RDD[(String, Seq[String])] = graph.links
 
+    val outMap: RDD[(String, (Int, Array[String]))] = links
+      .reduceByKey(P, _ ++ _)
+      .mapValues(_.distinct.toArray)
+      .mapValues(arr => (arr.length, arr))
+      .partitionBy(P)
+      .persist(StorageLevel.MEMORY_ONLY)
+
+    val nodesWithOut: RDD[(String, (Int, Array[String]))] = allNodes
+      .map(id => (id, (0, Array.empty[String])))
+      .partitionBy(P)
+      .leftOuterJoin(outMap)
+      .mapValues {
+        case ((_, _), Some((deg, outs))) => (deg, outs)
+        case _                           => (0, Array.empty[String])
+      }
+      .persist(StorageLevel.MEMORY_ONLY)
+
     val ranks: RDD[(String, Double)] = allNodes
-      .map(n => (n, 1.0 / N))
+      .map(id => (id, 1.0 / N))
+      .partitionBy(P)
+      .persist(StorageLevel.MEMORY_ONLY)
 
     // by default damping = 1.0, debug = false, plot = false
     // outputDir = None,
     // partitioner = new HashPartitioner(graph.spark.sparkContext.defaultParallelism)
     // storage = MEMORY_ONLY
     val ranks_oneStep = PageRankRDDOptimized.oneStep(
-      graph = graph,
       ranks = ranks,
-      links = links,
+      nodesWithOut = nodesWithOut,
       N = N,
+      partitioner = P,
       logger = testLogger
     )
 

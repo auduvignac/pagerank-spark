@@ -3,6 +3,7 @@ package pagerank
 import org.scalatest.funsuite.AnyFunSuite
 import org.apache.spark.rdd.RDD
 import org.apache.log4j.Logger
+import org.apache.spark.storage.StorageLevel
 import utils.SparkTestSession
 
 class MainRDDSpec extends AnyFunSuite with SparkTestSession {
@@ -21,16 +22,32 @@ class MainRDDSpec extends AnyFunSuite with SparkTestSession {
   test("oneStep keeps invariants on sample_graph.txt") {
 
     val N: Double = graph.nNodes.toDouble
-    val allNodes: RDD[String] = graph.allNodes
+    val allNodes: RDD[String] = graph.allNodes.persist(StorageLevel.MEMORY_ONLY)
     val links: RDD[(String, Seq[String])] = graph.links
+
+    val outMap: RDD[(String, (Int, Seq[String]))] = links
+      .reduceByKey(_ ++ _)
+      .mapValues(_.distinct)
+      .mapValues(outs => (outs.size, outs))
+
+    val nodesWithOut: RDD[(String, (Int, Seq[String]))] = allNodes
+      .map(nodeId => (nodeId, (0, Seq.empty[String])))
+      .leftOuterJoin(outMap)
+      .mapValues {
+        case ((_, _), Some((deg, outs))) => (deg, outs)
+        case _                           => (0, Seq.empty[String])
+      }
+      .persist(StorageLevel.MEMORY_ONLY)
 
     val ranks: RDD[(String, Double)] = allNodes
       .map(n => (n, 1.0 / N))
+      .persist(StorageLevel.MEMORY_ONLY)
 
     // by default damping = 1.0 and debug = false
     val ranks_oneStep = PageRankRDD.oneStep(
       ranks = ranks,
-      links = links,
+      nodesWithOut = nodesWithOut,
+      allNodes = allNodes,
       N = N,
       logger = testLogger
     )

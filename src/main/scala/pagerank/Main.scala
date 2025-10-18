@@ -70,7 +70,9 @@ object Main {
       iterations: Int,
       damping: Double,
       debug: Boolean,
-      plot: Boolean = false
+      plot: Boolean = false,
+      numpartitions: Int,
+      storage: String
   )(implicit spark: SparkSession, logger: Logger): Unit = {
 
     logger.info(s"==== [PageRank DF] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] ====")
@@ -79,9 +81,11 @@ object Main {
     val nodes = graph.nNodes
     val edges = graph.nEdges
 
+    logger.info(s"==== [PageRank DF] [Nombre de partitions : $numpartitions] [Stockage : $storage] ===")
+
     val start = System.nanoTime()
 
-    // Exécution du PageRank sur l’instance GraphDF
+    // Exécution du PageRank sur l'instance GraphDF
     val ranks = PageRankDF.computePageRank(
       graph = graph,
       iterations = iterations,
@@ -89,7 +93,9 @@ object Main {
       debug = debug,
       plot = plot,
       logger = logger,
-      outputDir = Some(output)
+      outputDir = Some(output),
+      numParts = numpartitions,
+      storage = PageRankUtils.storageLevelOf(storage)
     )
 
     // Déclenchement de tout le graphe de dépendances (DAG) via ranks.count()
@@ -119,13 +125,11 @@ object Main {
     val nodes = graph.nNodes
     val edges = graph.nEdges
 
-    val partitioner = new HashPartitioner(numpartitions)
-
-    logger.info(s"==== [PageRank RDD Optimisé] [Nombre de partitions : $numpartitions] ===")
+    logger.info(s"==== [PageRank RDD Optimisé] [Nombre de partitions : $numpartitions] [Stockage : $storage] ===")
 
     val start = System.nanoTime()
 
-    // Exécution du PageRank optimisé sur l’instance GraphRDD
+    // Exécution du PageRank optimisé sur l'instance GraphRDD
     val ranks = PageRankRDDOptimized.computePageRank(
       graph = graph,
       iterations = iterations,
@@ -134,7 +138,7 @@ object Main {
       plot = plot,
       logger = logger,
       outputDir = Some(output),
-      partitioner = Some(partitioner),
+      numParts = numpartitions,
       storage = PageRankUtils.storageLevelOf(storage)
     )
 
@@ -229,7 +233,9 @@ object Main {
               iterations = iterations,
               damping = damping,
               debug = debug,
-              plot = plot
+              plot = plot,
+              numpartitions = partitions,
+              storage = storage
             )
 
           case "rdd_optimized" =>
@@ -284,7 +290,9 @@ object Main {
               iterations = iterations,
               damping = damping,
               debug = debug,
-              plot = plot
+              plot = plot,
+              numpartitions = partitions,
+              storage = storage
             )
 
           case other =>

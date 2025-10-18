@@ -6,6 +6,7 @@ import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.{SparkSession, DataFrame, Dataset, Row}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+import org.apache.spark.storage.StorageLevel
 
 import utils.SparkTestSession
 
@@ -24,20 +25,57 @@ class MainDFSpec extends AnyFunSuite with SparkTestSession {
 
   test("oneStep keeps invariants on sample_graph.txt") {
 
-    val N: Double = graph.nNodes.toDouble
-    val allNodes: Dataset[Row] = graph.allNodes
-    val links: DataFrame = graph.links
+    val p = sc.defaultParallelism * 2
 
-    val ranks = allNodes
-      .withColumnRenamed("node", "page")
+    val N: Double = graph.nNodes.toDouble
+
+    val edges = graph.links
+      .filter(col("outlink").isNotNull)
+      .select(col("page").as("src"), col("outlink").as("dest"))
+      .distinct()
+      .repartition(p, col("src"))
+      .persist(StorageLevel.MEMORY_ONLY)
+
+    val nodes = edges.select(col("src").as("id"))
+      .union(edges.select(col("dest").as("id")))
+      .distinct()
+      .repartition(p, col("id"))
+      .persist(StorageLevel.MEMORY_ONLY)
+
+    val outdeg = edges
+      .groupBy(col("src"))
+      .agg(count(lit(1)).as("outdeg"))
+      .withColumnRenamed("src", "id")
+      .repartition(p, col("id"))
+      .persist(StorageLevel.MEMORY_ONLY)
+
+    val nodesWithDeg = nodes
+      .join(outdeg, Seq("id"), "left")
+      .na.fill(0, Seq("outdeg"))
+      .persist(StorageLevel.MEMORY_ONLY)
+
+    var ranks = nodes
       .withColumn("rank", lit(1.0 / N))
+      .persist(StorageLevel.MEMORY_ONLY)
+
+    ranks = ranks.localCheckpoint(eager = true)
+
+    val danglingIds = nodesWithDeg
+      .filter(col("outdeg") === 0)
+      .select(col("id"))
+      .repartition(p, col("id"))
+      .persist(StorageLevel.MEMORY_ONLY)
 
     // by default damping = 1.0 and debug = false
     val ranks_oneStep = PageRankDF.oneStep(
       ranks = ranks,
-      links = links,
-      allNodes = allNodes,
+      edges = edges,
+      nodes = nodes,
+      outdeg = outdeg,
+      danglingIds = danglingIds,
       N = N,
+      numParts = p,
+      storage = StorageLevel.MEMORY_ONLY,
       logger = testLogger
     )
 
@@ -48,8 +86,8 @@ class MainDFSpec extends AnyFunSuite with SparkTestSession {
     assert(math.abs(sum - 1.0) < 1e-6)
 
     // Check if all nodes still there
-    val nodes = collected.keySet
-    assert(nodes == Set("A", "B", "C", "D"))
+    val nodes_check = collected.keySet
+    assert(nodes_check == Set("A", "B", "C", "D"))
   }
 
   test("computePageRank converges correctly on sample_graph.txt") {
