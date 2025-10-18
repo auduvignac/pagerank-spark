@@ -1,0 +1,28 @@
+name: Scala CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      - name: Setup SBT
+        uses: coursier/setup-action@v1
+        with:
+          apps: sbt
+
+      - name: Compile
+        run: sbt compile
+
+      - name: Run tests
+        run: sbt test

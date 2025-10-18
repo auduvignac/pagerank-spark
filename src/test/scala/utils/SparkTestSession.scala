@@ -1,27 +1,26 @@
 package utils
 
 import org.apache.spark.sql.SparkSession
-import org.scalatest.{BeforeAndAfterAll, Suite}
+import org.scalatest.Suite
 
 /**
- * Trait utilitaire pour partager un SparkSession entre les tests.
- * Chaque suite qui hérite de SparkTestSession dispose d'un SparkSession unique
- * et propre, automatiquement arrêté à la fin de la suite.
+ * SparkSession unique, partagé par tous les tests.
+ * Il n'est pas arrêté à la fin de chaque suite (la JVM s'en charge).
  */
-trait SparkTestSession extends BeforeAndAfterAll { this: Suite =>
+trait SparkTestSession { this: Suite =>
 
-    // SparkSession partagé par tous les tests d'une même suite
-    @transient lazy val spark: SparkSession = SparkSession.builder()
-        .appName("PageRankTest")
-        .master("local[*]")
-        .getOrCreate()
+  // SparkSession global et paresseux (singleton)
+  @transient lazy val spark: SparkSession = SparkSessionSingleton.spark
+}
 
-    // Arrêt du SparkSession après tous les tests de la suite
-    override def afterAll(): Unit = {
-        try {
-        spark.stop()
-        } finally {
-        super.afterAll()
-        }
-    }
+private object SparkSessionSingleton {
+  @transient lazy val spark: SparkSession = {
+    SparkSession.builder()
+      .appName("PageRankTest")
+      .master("local[*]")
+      .config("spark.ui.enabled", "false")
+      .config("spark.sql.shuffle.partitions", "4")
+      .config("spark.driver.bindAddress", "127.0.0.1")
+      .getOrCreate()
+  }
 }
