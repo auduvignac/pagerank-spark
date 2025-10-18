@@ -15,6 +15,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Log in to GHCR
+      # CR_PAT
+      # CR : Container Registry (le service GHCR de GitHub)
+      # PAT Personal Access Token (type de jeton généré)
         run: echo ${{ secrets.CR_PAT }} | docker login ghcr.io -u auduvignac --password-stdin
 
       - name: Build and Push
