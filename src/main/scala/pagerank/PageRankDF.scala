@@ -32,12 +32,10 @@ object PageRankDF {
 
     val outdeg = links.groupBy("page").agg(count("outlink").as("outdeg"))
 
-    val contributions = links
+    val nextranks = links
       .join(outdeg, Seq("page"))
       .join(ranks, Seq("page"))
       .select($"outlink".as("page"), ($"rank" / $"outdeg").as("contribution"))
-
-    val nextranks = contributions
       .groupBy("page")
       .agg(sum("contribution").as("new_rank"))
       .withColumn(

@@ -25,18 +25,16 @@ object PageRankRDD {
         logger: Logger,
     ): RDD[(String, Double)] = {
 
-    // === Distribution : chaque page "src" distribue son rang à ses destinations ===
-    val contributions = links.join(ranks).values.flatMap{ case (links, rank) =>
+    val nextranks = links
+      .join(ranks)
+      .values
+      .flatMap{ case (links, rank) =>
         val size = links.size
         links.map(url => (url, rank / size))
       }
-
-    // === Agrégation : chaque page "dest" reçoit la somme des contributions ===
-    val nextranks = contributions
       .reduceByKey(_ + _)
       .mapValues(rank => (1 - damping) / N + damping * rank)
 
-    // === Retour
     nextranks
   }
 
