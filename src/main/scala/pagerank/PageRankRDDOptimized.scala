@@ -105,7 +105,8 @@ object PageRankRDDOptimized {
       logger: Logger,
       outputDir: Option[String] = None,
       numParts: Int = 0,
-      storage: StorageLevel = StorageLevel.MEMORY_ONLY
+      storage: StorageLevel = StorageLevel.MEMORY_ONLY,
+      metrics: Boolean = false
   )(implicit spark: SparkSession): RDD[(String, Double)] = {
 
     val sc = spark.sparkContext
@@ -162,6 +163,17 @@ object PageRankRDDOptimized {
 
     // === STEP 4: Itérations PageRank ===
     for (i <- 1 to iterations) {
+
+      if (metrics) {
+        logger.info(s"==== Début itération $i/$iterations ====")
+
+        // Taguer tous les jobs de cette itération
+        spark.sparkContext.setJobGroup(
+          s"PageRank-RDDOPT-iter-$i",
+          s"PageRank RDD Optimized iteration $i"
+        )
+      }
+
       val newRanks = oneStep(
         ranks = ranks,
         nodesWithOut = nodesWithOut,
@@ -173,9 +185,20 @@ object PageRankRDDOptimized {
         storage = storage
       )
 
-      // Cleanup des anciens rangs
+      if (metrics) {
+        // Déclenche l’action qui matérialise cette itération
+        // (permet à Spark de produire les métriques dans le listener)
+        newRanks.count()
+      }
+
+      // Nettoyage et persistance
       ranks.unpersist(blocking = false)
-      ranks = newRanks
+      ranks = newRanks.persist(storage)
+
+      if (metrics) {
+        // Fin du tag
+        spark.sparkContext.clearJobGroup()
+      }
 
       if (debug) {
         val iterWord = if (i > 1) "iterations" else "iteration"
@@ -197,8 +220,22 @@ object PageRankRDDOptimized {
       PageRankUtils.exportHistoryToCSV(history.get.toSeq, outputDir.get, logger)
     }
 
+    if (metrics) {
+      // Taguer tous les jobs de cette itération
+      spark.sparkContext.setJobGroup(
+        s"PageRank-RDDOptimized-ranks.count()",
+        s"PageRank-RDDOptimized-ranks.count()"
+      )
+    }
+
     // Forcer la matérialisation finale
     val finalCount = ranks.count()
+
+    if (metrics) {
+      // Fin du tag
+      spark.sparkContext.clearJobGroup()
+    }
+
     if (debug) {
       logger.debug(s"[PageRankRDDOptimized] Nombre final de nœuds: $finalCount")
     }

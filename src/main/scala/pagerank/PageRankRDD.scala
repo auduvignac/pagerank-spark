@@ -68,7 +68,8 @@ object PageRankRDD {
       plot: Boolean = false,
       logger: Logger,
       outputDir: Option[String] = None,
-      storage: StorageLevel = StorageLevel.MEMORY_ONLY
+      storage: StorageLevel = StorageLevel.MEMORY_ONLY,
+      metrics: Boolean = false
   )(implicit spark: SparkSession): RDD[(String, Double)] = {
 
     val sc = spark.sparkContext
@@ -108,6 +109,17 @@ object PageRankRDD {
       } else None
 
     for (i <- 1 to iterations) {
+
+      if (metrics) {
+        logger.info(s"==== Début itération $i/$iterations ====")
+
+        // Taguer tous les jobs de cette itération
+        spark.sparkContext.setJobGroup(
+          s"PageRank-RDD-iter-$i",
+          s"PageRank RDD iteration $i"
+        )
+      }
+
       val newRanks = oneStep(
         ranks = ranks,
         nodesWithOut = nodesWithOut,
@@ -118,9 +130,20 @@ object PageRankRDD {
         logger = logger
       )
 
-      // Unpersist les anciens rangs et persister les nouveaux
+      if (metrics) {
+        // Déclenche l’action qui matérialise cette itération
+        // (permet à Spark de produire les métriques dans le listener)
+        newRanks.count()
+      }
+
+      // Nettoyage et persistance
       ranks.unpersist(blocking = false)
       ranks = newRanks.persist(storage)
+
+      if (metrics) {
+        // Fin du tag
+        spark.sparkContext.clearJobGroup()
+      }
 
       if (debug) {
         val iterWord = if (i > 1) "iterations" else "iteration"
@@ -142,8 +165,22 @@ object PageRankRDD {
       PageRankUtils.exportHistoryToCSV(history.get.toSeq, outputDir.get, logger)
     }
 
+    if (metrics) {
+      // Taguer tous les jobs de cette itération
+      spark.sparkContext.setJobGroup(
+        s"PageRank-RDD-ranks.count()",
+        s"PageRank-RDD-ranks.count()"
+      )
+    }
+
     // Forcer la matérialisation finale
     val finalCount = ranks.count()
+
+    if (metrics) {
+      // Fin du tag
+      spark.sparkContext.clearJobGroup()
+    }
+
     if (debug) {
       logger.debug(s"Nombre final de nœuds avec rang: $finalCount")
     }

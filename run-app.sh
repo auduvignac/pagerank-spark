@@ -7,7 +7,7 @@ set -e  # Stop on error
 
 if [ $# -lt 1 ]; then
     echo "Usage:"
-    echo "  $0 [--mode=mode] [--input=\"file1,file2,...\"] [--output=dir] [--iterations=N] [--damping=val] [--partitions=P] [--storage=storage] [--plot] [--debug] [--build]"
+    echo "  $0 [--mode=mode] [--input=\"file1,file2,...\"] [--output=dir] [--iterations=N] [--damping=val] [--partitions=P] [--storage=storage] [--plot] [--debug] [--metrics] [--build]"
     echo "  mode ∈ {rdd, rdd_optimized, df, all, test}"
     echo "  storage ∈ {MEMORY_ONLY, MEMORY_ONLY_SER, MEMORY_AND_DISK, MEMORY_AND_DISK_SER, DISK_ONLY}"
     exit 1
@@ -24,6 +24,7 @@ STORAGE="MEMORY_ONLY"
 PLOT=false
 DEBUG=false
 BUILD=false
+METRICS=false
 
 # === Parsing des arguments ===
 while [[ $# -gt 0 ]]; do
@@ -54,6 +55,9 @@ while [[ $# -gt 0 ]]; do
         ;;
         --debug)
         DEBUG=true
+        ;;
+        --metrics)
+        METRICS=true
         ;;
         --build)
         BUILD=true
@@ -115,9 +119,10 @@ echo "Partitions"   : $PARTITIONS
 echo "Storage"      : $STORAGE
 echo "Plot          : $PLOT"
 echo "Debug         : $DEBUG"
+echo "Metrics       : $METRICS"
 echo "----------------------------------------------"
 
-docker exec spark-submit /app/spark-submit.sh "$MODE" "$INPUT" "$OUTPUT" "$ITER" "$DAMPING" "$PARTITIONS" "$STORAGE" "$PLOT" "$DEBUG"
+docker exec spark-submit /app/spark-submit.sh "$MODE" "$INPUT" "$OUTPUT" "$ITER" "$DAMPING" "$PARTITIONS" "$STORAGE" "$PLOT" "$DEBUG" "$METRICS"
 
 echo ""
 echo "📜 Logs du conteneur spark-submit :"

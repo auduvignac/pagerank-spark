@@ -19,6 +19,7 @@ PARTITIONS=${6:-128}
 STORAGE=${7:-"MEMORY_ONLY"}
 PLOT=${8:-false}
 DEBUG=${9:-false}
+METRICS=${9:-false}
 
 # --- Fichiers & configuration ---
 JAR="target/scala-2.12/pagerankspark_2.12-0.1.jar"
@@ -50,6 +51,7 @@ echo "Nombre de partitions    : $PARTITIONS"
 echo "Stockage                : $STORAGE"
 echo "Plot                    : $PLOT"
 echo "Debug                   : $DEBUG"
+echo "Metrics                 : $METRICS"
 echo "=============================================="
 
 # --- Exécution Spark ---
@@ -58,7 +60,7 @@ $TIME_CMD spark-submit \
   --class "$MAIN_CLASS" \
   --conf "spark.driver.extraJavaOptions=-Dfile.encoding=UTF-8 -Dlog4j.configurationFile=$LOG_CONF" \
   --conf "spark.executor.extraJavaOptions=-Dfile.encoding=UTF-8 -Dlog4j.configurationFile=$LOG_CONF" \
-  "$JAR" "$MODE" "$INPUT" "$OUTPUT" "$ITER" "$DAMPING" "$PARTITIONS" "$STORAGE" \
+  "$JAR" "$MODE" "$INPUT" "$OUTPUT" "$ITER" "$DAMPING" "$PARTITIONS" "$STORAGE" "$METRICS" \
   $( [ "$PLOT" == "true" ] && echo "--plot" ) \
   $( [ "$DEBUG" == "true" ] && echo "--debug" )
 

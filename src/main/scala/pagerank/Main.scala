@@ -32,7 +32,8 @@ object Main {
       iterations: Int,
       damping: Double,
       debug: Boolean,
-      plot: Boolean = false
+      plot: Boolean = false,
+      metrics: Boolean = false
   )(implicit spark: SparkSession, logger: Logger): Unit = {
 
     logger.info(s"==== [PageRank RDD] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] ====")
@@ -51,11 +52,25 @@ object Main {
       debug = debug,
       plot = plot,
       logger = logger,
-      outputDir = Some(output)
+      outputDir = Some(output),
+      metrics = metrics
     )
+
+    if (metrics) {
+      // Taguer tous les jobs de cette itération
+      spark.sparkContext.setJobGroup(
+        s"PageRank-RDD-ranks.count()",
+        s"PageRank-RDD-ranks.count()"
+      )
+    }
 
     // Déclenchement de tout le graphe de dépendances (DAG) via ranks.count()
     ranks.count()
+
+    if (metrics) {
+      // Fin du tag
+      spark.sparkContext.clearJobGroup()
+    }
 
     val duration = (System.nanoTime() - start) / 1e9
     logger.info(f"==== [PageRank RDD] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] [temps d'exécution $duration%.2f s] ====")
@@ -72,7 +87,8 @@ object Main {
       debug: Boolean,
       plot: Boolean = false,
       numpartitions: Int,
-      storage: String
+      storage: String,
+      metrics: Boolean = false
   )(implicit spark: SparkSession, logger: Logger): Unit = {
 
     logger.info(s"==== [PageRank DF] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] ====")
@@ -95,11 +111,26 @@ object Main {
       logger = logger,
       outputDir = Some(output),
       numParts = numpartitions,
-      storage = PageRankUtils.storageLevelOf(storage)
+      storage = PageRankUtils.storageLevelOf(storage),
+      metrics = metrics
+      
     )
+
+    if (metrics) {
+      // Taguer tous les jobs de cette itération
+      spark.sparkContext.setJobGroup(
+        s"PageRank-DF-ranks.count()",
+        s"PageRank-DF-ranks.count()"
+      )
+    }
 
     // Déclenchement de tout le graphe de dépendances (DAG) via ranks.count()
     ranks.count()
+
+    if (metrics) {
+      // Fin du tag
+      spark.sparkContext.clearJobGroup()
+    }
 
     val duration = (System.nanoTime() - start) / 1e9
     logger.info(f"==== [PageRank DF] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] [temps d'exécution $duration%.2f s] ====")
@@ -116,7 +147,8 @@ object Main {
       debug: Boolean,
       plot: Boolean = false,
       numpartitions: Int,
-      storage: String
+      storage: String,
+      metrics: Boolean = false
   )(implicit spark: SparkSession, logger: Logger): Unit = {
 
     logger.info(s"==== [PageRank RDD Optimisé] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] ====")
@@ -139,11 +171,25 @@ object Main {
       logger = logger,
       outputDir = Some(output),
       numParts = numpartitions,
-      storage = PageRankUtils.storageLevelOf(storage)
+      storage = PageRankUtils.storageLevelOf(storage),
+      metrics = metrics
     )
+
+    if (metrics) {
+      // Taguer tous les jobs de cette itération
+      spark.sparkContext.setJobGroup(
+        s"PageRank-RDDOptimized-ranks.count()",
+        s"PageRank-RDDOptimized-ranks.count()"
+      )
+    }
 
     // Déclenchement de tout le graphe de dépendances (DAG) via ranks.count()
     ranks.count()
+
+    if (metrics) {
+      // Fin du tag
+      spark.sparkContext.clearJobGroup()
+    }
 
     val duration = (System.nanoTime() - start) / 1e9
     logger.info(f"==== [PageRank RDD Optimisé] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] [temps d'exécution $duration%.2f s] ====")
@@ -176,6 +222,7 @@ object Main {
     val storage     = if (args.length > 6 && !args(6).startsWith("--")) args(6) else "MEMORY_ONLY"
     val plot        = args.contains("--plot")
     val debug       = args.contains("--debug")
+    val metrics       = args.contains("--metrics")
 
     // Parsing plus robuste
     val positionalArgs = args.filterNot(_.startsWith("--"))
@@ -189,6 +236,7 @@ object Main {
     logger.info(s"-> Type de stockage: $storage")
     logger.info(s"-> Plot: $plot")
     logger.info(s"-> Debug: $debug")
+    logger.info(s"-> Metrics: $metrics")
 
     // possibilité de passer plusieurs fichiers séparés par des virgules
     // pour en générer une boucle
@@ -197,6 +245,10 @@ object Main {
     implicit val spark: SparkSession = SparkSession.builder()
       .appName(s"PageRank-$method")
       .getOrCreate()
+  
+    // === Register custom metrics listener ===
+    val listener = new PageRankMetricsListener(logger, Some(s"$output/pagerank_${method}_metrics.csv"))
+    spark.sparkContext.addSparkListener(listener)
 
     for (path <- paths) {
 
@@ -204,9 +256,23 @@ object Main {
 
       logger.info(s"==== [Traitement du graphe] [$path] [itérations : $iterations] [facteur d'amortissement : $damping] ====")
 
+      // === (1) Créer un listener spécifique à ce graph ===
+      val metricsFile = s"$output/pagerank_${fileName.replace(".txt", "")}_metrics.csv"
+      val listener = new PageRankMetricsListener(logger, Some(metricsFile))
+
+      // === (2) L’enregistrer dans le contexte Spark ===
+      spark.sparkContext.addSparkListener(listener)
+
       try {
         method match {
           case "rdd" =>
+            if (metrics) {
+              // Taguer tous les jobs de cette itération
+              spark.sparkContext.setJobGroup(
+                s"PageRank-RDD-$fileName",
+                s"PageRank-RDD-$fileName"
+              )
+            }
             val rddgraph = new GraphRDD(
               name = s"Graph-RDD-$fileName",
               path = path,
@@ -218,10 +284,22 @@ object Main {
               iterations = iterations,
               damping = damping,
               debug = debug,
-              plot = plot
+              plot = plot,
+              metrics = metrics
             )
+            if (metrics) {
+              // Fin du tag
+              spark.sparkContext.clearJobGroup()
+            }
 
           case "df" =>
+            if (metrics) {
+              // Taguer tous les jobs de cette itération
+              spark.sparkContext.setJobGroup(
+                s"PageRank-DF-$fileName",
+                s"PageRank-DF-$fileName"
+              )
+            }
             val dfgraph = new GraphDF(
               name = s"Graph-DF-$fileName",
               path = path,
@@ -235,10 +313,22 @@ object Main {
               debug = debug,
               plot = plot,
               numpartitions = partitions,
-              storage = storage
+              storage = storage,
+              metrics = metrics
             )
+            if (metrics) {
+              // Fin du tag
+              spark.sparkContext.clearJobGroup()
+            }
 
           case "rdd_optimized" =>
+            if (metrics) {
+              // Taguer tous les jobs de cette itération
+              spark.sparkContext.setJobGroup(
+                s"PageRank-RDDOptimized-$fileName",
+                s"PageRank-RDDOptimized-$fileName"
+              )
+            }
             val rddoptmizedgraph = new GraphRDD(
               name = s"Graph-RDD-$fileName",
               path = path,
@@ -252,8 +342,13 @@ object Main {
               debug = debug,
               plot = plot,
               numpartitions = partitions,
-              storage = storage
+              storage = storage,
+              metrics = metrics
             )
+            if (metrics) {
+              // Fin du tag
+              spark.sparkContext.clearJobGroup()
+            }
 
           case "all" =>
             val rddgraph = new GraphRDD(
@@ -272,7 +367,8 @@ object Main {
               iterations = iterations,
               damping = damping,
               debug = debug,
-              plot = plot
+              plot = plot,
+              metrics = metrics
             )
             computePageRankRDDOptimized(
               graph = rddgraph,
@@ -282,7 +378,8 @@ object Main {
               debug = debug,
               plot = plot,
               numpartitions = partitions,
-              storage = storage
+              storage = storage,
+              metrics = metrics
             )
             computePageRankDF(
               graph = dfgraph,
@@ -292,7 +389,8 @@ object Main {
               debug = debug,
               plot = plot,
               numpartitions = partitions,
-              storage = storage
+              storage = storage,
+              metrics = metrics
             )
 
           case other =>
@@ -304,5 +402,7 @@ object Main {
           logger.error(s"Erreur lors du traitement de $input : ${e.getMessage}")
       }
     }
+    
+    listener.printTotals()
   }
 }

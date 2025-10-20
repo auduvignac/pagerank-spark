@@ -138,7 +138,8 @@ object PageRankDF {
       logger: Logger,
       outputDir: Option[String] = None,
       numParts: Int = 0,
-      storage: StorageLevel = StorageLevel.MEMORY_ONLY
+      storage: StorageLevel = StorageLevel.MEMORY_ONLY,
+      metrics: Boolean = false
   )(implicit spark: SparkSession): DataFrame = {
 
     import spark.implicits._
@@ -212,6 +213,17 @@ object PageRankDF {
 
     // === STEP 7: Itérations PageRank ===
     for (i <- 1 to iterations) {
+
+      if (metrics) {
+        logger.info(s"==== Début itération $i/$iterations ====")
+
+        // Taguer tous les jobs de cette itération
+        spark.sparkContext.setJobGroup(
+          s"PageRank-DF-iter-$i",
+          s"PageRank DF iteration $i"
+        )
+      }
+
       val newRanks = oneStep(
         ranks = ranks,
         edges = edges,
@@ -226,9 +238,20 @@ object PageRankDF {
         logger = logger
       )
 
+      if (metrics) {
+        // Déclenche l’action qui matérialise cette itération
+        // (permet à Spark de produire les métriques dans le listener)
+        newRanks.count()
+      }
+
       // Cleanup ancien ranks
       ranks.unpersist(blocking = false)
       ranks = newRanks
+
+      if (metrics) {
+        // Fin du tag
+        spark.sparkContext.clearJobGroup()
+      }
 
       if (debug) {
         val iterWord = if (i > 1) "itérations" else "itération"
@@ -252,10 +275,24 @@ object PageRankDF {
       PageRankUtils.exportHistoryToCSV(history.get.toSeq, outputDir.get, logger)
     }
 
+    if (metrics) {
+      // Taguer tous les jobs de cette itération
+      spark.sparkContext.setJobGroup(
+        s"PageRank-DF-ranks.count()",
+        s"PageRank-DF-ranks.count()"
+      )
+    }
+
     // Matérialiser le résultat final
     val finalCount = ranks.count()
+
     if (debug) {
       logger.debug(s"[PageRankDF] Nombre final de nœuds: $finalCount")
+    }
+
+    if (metrics) {
+      // Fin du tag
+      spark.sparkContext.clearJobGroup()
     }
 
     // Cleanup des structures intermédiaires
