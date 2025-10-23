@@ -10,7 +10,7 @@ import org.apache.spark.HashPartitioner
 
 import utils.SparkTestSession
 
-class MainRDDOptimizedSpec extends AnyFunSuite with SparkTestSession {
+class MainRDDPartitionedSpec extends AnyFunSuite with SparkTestSession {
   val testLogger: Logger = Logger.getLogger("TestLogger")
   lazy val sc = spark.sparkContext
   implicit val sparkSession = spark
@@ -57,7 +57,7 @@ class MainRDDOptimizedSpec extends AnyFunSuite with SparkTestSession {
     // outputDir = None,
     // partitioner = new HashPartitioner(graph.spark.sparkContext.defaultParallelism)
     // storage = MEMORY_ONLY
-    val ranks_oneStep = PageRankRDDOptimized.oneStep(
+    val ranks_oneStep = PageRankRDDPartitioned.oneStep(
       ranks = ranks,
       nodesWithOut = nodesWithOut,
       N = N,
@@ -78,7 +78,7 @@ class MainRDDOptimizedSpec extends AnyFunSuite with SparkTestSession {
     // outputDir = None,
     // partitioner = new HashPartitioner(graph.spark.sparkContext.defaultParallelism)
     // storage = StorageLevel.MEMORY_ONLY
-    val result = PageRankRDDOptimized.computePageRank(
+    val result = PageRankRDDPartitioned.computePageRank(
       graph = graph,
       iterations = 10,
       logger = testLogger

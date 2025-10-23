@@ -7,7 +7,7 @@ import org.apache.spark.Partitioner
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.HashPartitioner
 
-object PageRankRDDOptimized {
+object PageRankRDDPartitioned {
 
     /**
     * Effectue une itération du calcul PageRank optimisée avec partitioning :
@@ -24,58 +24,51 @@ object PageRankRDDOptimized {
     * @param logger       logger permettant d'afficher les messages de log
     * @param storage      niveau de persistance
     */
-    def oneStep(
-        ranks: RDD[(String, Double)],
-        nodesWithOut: RDD[(String, (Int, Array[String]))],
-        N: Double,
-        damping: Double = 1.0,
-        partitioner: Partitioner,
-        debug: Boolean = false,
-        logger: Logger,
-        storage: StorageLevel = StorageLevel.MEMORY_ONLY
-    ): RDD[(String, Double)] = {
+  def oneStep(
+      ranks: RDD[(String, Double)],
+      nodesWithOut: RDD[(String, (Int, Array[String]))],
+      N: Double,
+      damping: Double = 1.0,
+      partitioner: Partitioner,
+      debug: Boolean = false,
+      logger: Logger,
+      storage: StorageLevel = StorageLevel.MEMORY_ONLY
+  ): RDD[(String, Double)] = {
 
-    // Calculer la masse des dangling nodes (nœuds sans liens sortants)
-    // join() est efficace car ranks et nodesWithOut partagent le même partitioner
-    val danglingMass = nodesWithOut.join(ranks)
+    // join unique
+    val joined = nodesWithOut.join(ranks).persist(storage)
+
+    val danglingMass = joined
       .filter { case (_, ((deg, _), _)) => deg == 0 }
       .map { case (_, ((_, _), r)) => r }
       .sum()
 
-    // Calculer les contributions des nœuds non-dangling
-    // join() sans shuffle car même partitioner
-    val contribs = nodesWithOut.join(ranks)
+    val contribs = joined
       .flatMap { case (_, ((deg, outs), r)) =>
         if (deg == 0) Iterator.empty
         else outs.iterator.map(d => (d, r / deg))
       }
-      .reduceByKey(partitioner, _ + _) // CRITICAL: utiliser le partitioner pour éviter shuffle
+      .reduceByKey(partitioner, _ + _)
 
-    // Base du PageRank : redistribution uniforme + masse des dangling nodes
     val base = ((1.0 - damping) / N) + (damping * danglingMass / N)
-
-    // CRITICAL: Créer baseRDD à partir de ranks pour préserver le partitioner
     val baseRDD = ranks.mapValues(_ => base)
 
-    // leftOuterJoin sans shuffle car baseRDD et contribs ont le même partitioner
     val newRanks = baseRDD
       .leftOuterJoin(contribs)
       .mapValues { case (b, cOpt) => b + damping * cOpt.getOrElse(0.0) }
-      .partitionBy(partitioner) // assure que le partitioner est préservé
       .persist(storage)
 
-    // Normaliser pour que la somme = 1.0
-    val sumRanks = newRanks.values.sum()
+    val sumRanks = newRanks.mapPartitions(it => Iterator(it.map(_._2).sum)).sum()
+
     val normalizedRanks = newRanks
       .mapValues(_ / sumRanks)
-      .partitionBy(partitioner) // CRITICAL: préserver le partitioner
       .persist(storage)
 
-    // Cleanup
+    joined.unpersist(blocking = false)
     newRanks.unpersist(blocking = false)
-
     normalizedRanks
   }
+
 
   /**
     * Calcul complet du PageRank sur N itérations optimisé avec partitioning

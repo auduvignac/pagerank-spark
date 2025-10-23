@@ -10,7 +10,7 @@ import org.apache.spark.storage.StorageLevel
 
 import utils.SparkTestSession
 
-class MainDFSpec extends AnyFunSuite with SparkTestSession {
+class MainDFPartitionedSpec extends AnyFunSuite with SparkTestSession {
   val testLogger: Logger = Logger.getLogger("TestLogger")
   lazy val sc = spark.sparkContext
   implicit val sparkSession = spark
@@ -19,7 +19,7 @@ class MainDFSpec extends AnyFunSuite with SparkTestSession {
   val path = "data/sample_graph.txt"
 
   val graph = new GraphDF(
-    name = "Graph-DF-sample_graph",
+    name = "Graph-DF-Partitioned-sample_graph",
     path = path
   )
 
@@ -49,6 +49,11 @@ class MainDFSpec extends AnyFunSuite with SparkTestSession {
       .repartition(p, col("id"))
       .persist(StorageLevel.MEMORY_ONLY)
 
+    val outdegPos = outdeg
+      .filter(col("outdeg") > 0)
+      .withColumnRenamed("id", "src")
+      .persist(StorageLevel.MEMORY_ONLY)
+
     val nodesWithDeg = nodes
       .join(outdeg, Seq("id"), "left")
       .na.fill(0, Seq("outdeg"))
@@ -67,14 +72,13 @@ class MainDFSpec extends AnyFunSuite with SparkTestSession {
       .persist(StorageLevel.MEMORY_ONLY)
 
     // by default damping = 1.0 and debug = false
-    val ranks_oneStep = PageRankDF.oneStep(
+    val ranks_oneStep = PageRankDFPartitioned.oneStep(
       ranks = ranks,
       edges = edges,
       nodes = nodes,
-      outdeg = outdeg,
+      outdegPos = outdegPos,
       danglingIds = danglingIds,
       N = N,
-      numParts = p,
       storage = StorageLevel.MEMORY_ONLY,
       logger = testLogger
     )
@@ -94,7 +98,7 @@ class MainDFSpec extends AnyFunSuite with SparkTestSession {
 
     // by default damping = 1.0, debug = false, 
     // plot = false and outputDir = None
-    val result = PageRankDF.computePageRank(
+    val result = PageRankDFPartitioned.computePageRank(
       graph = graph,
       iterations = 10,
       logger = testLogger

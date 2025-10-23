@@ -8,7 +8,7 @@ set -e  # Stop on error
 if [ $# -lt 1 ]; then
     echo "Usage:"
     echo "  $0 [--mode=mode] [--input=\"file1,file2,...\"] [--output=dir] [--iterations=N] [--damping=val] [--partitions=P] [--storage=storage] [--plot] [--debug] [--metrics] [--build]"
-    echo "  mode ∈ {rdd, rdd_optimized, df, all, test}"
+    echo "  mode ∈ {rdd, rdd_partitioned, df, df_partitioned, all, test}"
     echo "  storage ∈ {MEMORY_ONLY, MEMORY_ONLY_SER, MEMORY_AND_DISK, MEMORY_AND_DISK_SER, DISK_ONLY}"
     exit 1
 fi
@@ -20,7 +20,7 @@ OUTPUT="output"
 ITER=10
 DAMPING=1.0
 PARTITIONS=128
-STORAGE="MEMORY_ONLY"
+STORAGE="MEMORY_AND_DISK_SER"
 PLOT=false
 DEBUG=false
 BUILD=false
@@ -28,45 +28,45 @@ METRICS=false
 
 # === Parsing des arguments ===
 while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --mode=*)
-        MODE="${1#*=}"
-        ;;
-        --input=*)
-        INPUT="${1#*=}"
-        ;;
-        --output=*)
-        OUTPUT="${1#*=}"
-        ;;
-        --iteration=*|--iterations=*)
-        ITER="${1#*=}"
-        ;;
-        --damping=*)
-        DAMPING="${1#*=}"
-        ;;
-        --partitions=*)
-        PARTITIONS="${1#*=}"
-        ;;
-        --storage=*)
-        STORAGE="${1#*=}"
-        ;;
-        --plot)
-        PLOT=true
-        ;;
-        --debug)
-        DEBUG=true
-        ;;
-        --metrics)
-        METRICS=true
-        ;;
-        --build)
-        BUILD=true
-        ;;
-        *)
-        echo "⚠️  Argument inconnu : $1"
-        ;;
-    esac
-    shift
+  case "$1" in
+    --mode=*)
+    MODE="${1#*=}"
+    ;;
+    --input=*)
+    INPUT="${1#*=}"
+    ;;
+    --output=*)
+    OUTPUT="${1#*=}"
+    ;;
+    --iteration=*|--iterations=*)
+    ITER="${1#*=}"
+    ;;
+    --damping=*)
+    DAMPING="${1#*=}"
+    ;;
+    --partitions=*)
+    PARTITIONS="${1#*=}"
+    ;;
+    --storage=*)
+    STORAGE="${1#*=}"
+    ;;
+    --plot)
+    PLOT=true
+    ;;
+    --debug)
+    DEBUG=true
+    ;;
+    --metrics)
+    METRICS=true
+    ;;
+    --build)
+    BUILD=true
+    ;;
+    *)
+    echo "⚠️  Argument inconnu : $1"
+    ;;
+  esac
+  shift
 done
 
 # =========================================================
@@ -74,22 +74,22 @@ done
 # =========================================================
 # Si l'utilisateur a demandé une compilation
 if [ "$BUILD" = true ]; then
-    echo "🔧 Compilation du projet Scala..."
+  echo "🔧 Compilation du projet Scala..."
 
-    # Vérifie que sbt est installé
-    if ! command -v sbt &>/dev/null; then
-        echo "❌ Erreur : 'sbt' n'est pas installé sur ta machine hôte."
-        echo "   ➜ Installe-le avant de lancer ce script."
-        exit 1
-    fi
+  # Vérifie que sbt est installé
+  if ! command -v sbt &>/dev/null; then
+      echo "❌ Erreur : 'sbt' n'est pas installé sur ta machine hôte."
+      echo "   ➜ Installe-le avant de lancer ce script."
+      exit 1
+  fi
 
-    # Nettoie et recompile le projet
-    if sbt clean package; then
-        echo "✅ Compilation réussie."
-    else
-        echo "❌ Échec de la compilation Scala."
-        exit 1
-    fi
+  # Nettoie et recompile le projet
+  if sbt clean package; then
+      echo "✅ Compilation réussie."
+  else
+      echo "❌ Échec de la compilation Scala."
+      exit 1
+  fi
 fi
 
 # =========================================================

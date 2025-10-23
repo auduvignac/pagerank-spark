@@ -1,26 +1,26 @@
 package pagerank
 
 import org.apache.log4j.Logger
-import org.apache.spark.sql.{SparkSession, DataFrame}
+import org.apache.spark.sql.{SparkSession, DataFrame, Dataset, Row}
 import org.apache.spark.sql.functions._
 import org.apache.spark.storage.StorageLevel
 
-object PageRankDF {
+object PageRankDFPartitioned {
 
   /**
-    * Effectue une itération du calcul PageRank avec DataFrames (sans partitionnement explicite).
+    * Effectue une itération optimisée du calcul PageRank avec DataFrames.
     *
     * Points clés :
-    * - Pas de repartition manuelle : Spark gère la distribution.
+    * - Pas de repartition dans la boucle : on s'appuie sur l'alignement initial.
     * - Agrégations globales via RDD[Double].sum() pour limiter la planification Catalyst.
     * - Persistance sérialisée disque fallback (MEMORY_AND_DISK_SER) par défaut.
     */
   def oneStep(
-      ranks: DataFrame,
-      edges: DataFrame,
-      nodes: DataFrame,
-      outdegPos: DataFrame,
-      danglingIds: DataFrame,
+      ranks: DataFrame,       // (id, rank)
+      edges: DataFrame,       // (src, dest)
+      nodes: DataFrame,       // (id)
+      outdegPos: DataFrame,   // (id, outdeg)
+      danglingIds: DataFrame, // (id) où outdeg == 0
       N: Double,
       damping: Double = 1.0,
       storage: StorageLevel = StorageLevel.MEMORY_ONLY,
@@ -30,7 +30,7 @@ object PageRankDF {
 
     import spark.implicits._
 
-    // === 1) Masse des dangling nodes ===
+    // === 1) Masse des dangling nodes (RDD.sum pour limiter les coûts Catalyst) ===
     val danglingMass: Double =
       ranks.join(danglingIds, Seq("id"), "left_semi")
         .select(col("rank"))
@@ -40,7 +40,6 @@ object PageRankDF {
 
     if (debug) logger.debug(f"[PageRankDF] Dangling mass: $danglingMass%.6f")
 
-    // === 2) Contributions : join edges ↔ ranks ↔ outdeg>0 puis groupBy(dest) ===
     val contribs = edges
       .join(
         ranks.select(col("id").as("src"), col("rank").as("rank_src")),
@@ -53,7 +52,7 @@ object PageRankDF {
       .agg(sum(col("contrib")).as("sumContrib"))
       .persist(storage)
 
-    // === 3) Nouveau rang ===
+    // === 3) Nouveau rang : base + damping * contributions (left join sur tous les nœuds) ===
     val base = ((1.0 - damping) / N) + (damping * danglingMass / N)
 
     val newRanks = nodes
@@ -64,7 +63,7 @@ object PageRankDF {
       )
       .persist(storage)
 
-    // === 4) Normalisation ===
+    // === 4) Normalisation (RDD.sum) ===
     val sumRanks = newRanks.select(col("rank")).rdd.mapPartitions(it =>
       Iterator(it.map(_.getDouble(0)).sum)
     ).sum()
@@ -82,7 +81,13 @@ object PageRankDF {
   }
 
   /**
-    * Calcul complet du PageRank sans partitionnement manuel.
+    * Calcul complet du PageRank optimisé avec DataFrames.
+    *
+    * Stratégie :
+    * - Repartition initiale UNIQUE (hors boucle), persistance sérialisée robuste.
+    * - Itérations sans repartition supplémentaires.
+    * - Agrégations globales via RDD.sum.
+    * - Option pour désactiver AQE sur gros graphes (peut éviter des reshuffles adaptatifs).
     */
   def computePageRank(
       graph: GraphDF,
@@ -92,26 +97,36 @@ object PageRankDF {
       plot: Boolean = false,
       logger: Logger,
       outputDir: Option[String] = None,
+      numParts: Int = 0,
       storage: StorageLevel = StorageLevel.MEMORY_ONLY,
       metrics: Boolean = false
   )(implicit spark: SparkSession): DataFrame = {
 
     import spark.implicits._
 
+    // Déterminer le nombre de partitions (une seule préparation hors boucle)
+    val p = if (numParts > 0) numParts else spark.sparkContext.defaultParallelism * 2
+    if (debug) {
+      logger.debug(s"[PageRankDF] Partitions utilisées: $p")
+      logger.debug(s"[PageRankDF] StorageLevel: $storage")
+    }
+
     val N: Double = graph.nNodes.toDouble
-    if (debug) logger.debug(s"[PageRankDF] StorageLevel: $storage")
 
     // === (1) Edges (src, dest) ===
     val edges = graph.links
       .filter(col("outlink").isNotNull)
       .select(col("page").as("src"), col("outlink").as("dest"))
       .distinct()
+      .repartitionByRange(p, col("src"))
       .persist(storage)
 
     // === (2) Nodes (id) ===
+    // Remarque : si GraphDF expose allNodes, on peut l'utiliser directement.
     val nodes = edges.select(col("src").as("id"))
       .union(edges.select(col("dest").as("id")))
       .distinct()
+      .repartition(p, col("id")) // **unique repartition**, alignée sur id
       .persist(storage)
 
     // === (3) Out-degree (id, outdeg) ===
@@ -119,6 +134,7 @@ object PageRankDF {
       .groupBy(col("src"))
       .agg(count(lit(1)).as("outdeg"))
       .withColumnRenamed("src", "id")
+      .repartition(p, col("id"))
       .persist(storage)
 
     // === (4) NodesWithDeg + Dangling ===
@@ -127,6 +143,7 @@ object PageRankDF {
       .na.fill(0, Seq("outdeg"))
       .persist(storage)
 
+    // === Contributions : joindre edges ↔ ranks ↔ outdeg>0 puis groupBy(dest) ===
     val outdegPos = outdeg
       .filter(col("outdeg") > 0)
       .withColumnRenamed("id", "src")
@@ -142,7 +159,7 @@ object PageRankDF {
       logger.debug(s"[PageRankDF] Dangling nodes: $danglingCount")
     }
 
-    // === (5) Initialisation des rangs ===
+    // === (5) Ranks init (id, rank) ===
     var ranks = nodes
       .withColumn("rank", lit(1.0 / N))
       .persist(storage)
@@ -180,12 +197,18 @@ object PageRankDF {
         logger = logger
       )
 
-      if (metrics) newRanks.count()
+      if (metrics) {
+        // Matérialise pour exposer les métriques au listener
+        newRanks.count()
+      }
 
+      // Rotation des persistes
       ranks.unpersist(blocking = false)
       ranks = newRanks
 
-      if (metrics) spark.sparkContext.clearJobGroup()
+      if (metrics) {
+        spark.sparkContext.clearJobGroup()
+      }
 
       if (debug) {
         val iterWord = if (i > 1) "itérations" else "itération"
@@ -200,30 +223,40 @@ object PageRankDF {
         logger.debug(f"Somme des rangs: $sum%.6f")
       }
 
-      if (plot) PageRankUtils.appendSnapshot(history, ranks.withColumnRenamed("id", "page"))
+      if (plot) {
+        PageRankUtils.appendSnapshot(history, ranks.withColumnRenamed("id", "page"))
+      }
     }
 
-    if (plot && outputDir.isDefined)
+    if (plot && outputDir.isDefined) {
       PageRankUtils.exportHistoryToCSV(history.get.toSeq, outputDir.get, logger)
+    }
 
-    if (metrics) spark.sparkContext.setJobGroup(
-      s"PageRank-DF-ranks.count()",
-      s"PageRank-DF-ranks.count()"
-    )
+    if (metrics) {
+      spark.sparkContext.setJobGroup(
+        s"PageRank-DF-ranks.count()",
+        s"PageRank-DF-ranks.count()"
+      )
+    }
 
     val finalCount = ranks.count()
-    if (debug) logger.debug(s"[PageRankDF] Nombre final de nœuds: $finalCount")
 
-    if (metrics) spark.sparkContext.clearJobGroup()
+    if (debug) {
+      logger.debug(s"[PageRankDF] Nombre final de nœuds: $finalCount")
+    }
 
-    // === Cleanup ===
+    if (metrics) {
+      spark.sparkContext.clearJobGroup()
+    }
+
+    // === Cleanup structures intermédiaires ===
     edges.unpersist(blocking = false)
     nodes.unpersist(blocking = false)
     outdeg.unpersist(blocking = false)
     nodesWithDeg.unpersist(blocking = false)
     danglingIds.unpersist(blocking = false)
 
-    // Renommer "id" en "page"
+    // Renommer "id" en "page" pour homogénéité avec l'API RDD
     ranks.withColumnRenamed("id", "page")
   }
 }

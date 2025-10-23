@@ -12,7 +12,7 @@ import org.apache.spark.sql.functions._
 
 /**
  * Point d'entrée principal pour exécuter PageRank
- * sur les variantes RDD, DataFrame et RDD Optimisé.
+ * sur les variantes RDD, DataFrame et RDD Partitioné.
  */
 object Main {
 
@@ -78,9 +78,9 @@ object Main {
     PageRankUtils.appendBenchmark("RDD", graph.fileName, iterations, nodes, edges, duration, output)
   }
 
-  /** Exécution PageRank DataFrame */
-  def computePageRankDF(
-      graph: GraphDF,
+  /** Exécution PageRank RDD partitionné */
+  def computePageRankRDDPartitioned(
+      graph: GraphRDD,
       output: String,
       iterations: Int,
       damping: Double,
@@ -91,13 +91,69 @@ object Main {
       metrics: Boolean = false
   )(implicit spark: SparkSession, logger: Logger): Unit = {
 
-    logger.info(s"==== [PageRank DF] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] ====")
+    logger.info(s"==== [PageRank RDD Partitioned] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] ====")
 
     // Comptes à la demande (lazy)
     val nodes = graph.nNodes
     val edges = graph.nEdges
 
-    logger.info(s"==== [PageRank DF] [Nombre de partitions : $numpartitions] [Stockage : $storage] ===")
+    logger.info(s"==== [PageRank RDD Partitioned] [Nombre de partitions : $numpartitions] [Stockage : $storage] ===")
+
+    val start = System.nanoTime()
+
+    // Exécution du PageRank partitionné sur l'instance GraphRDD
+    val ranks = PageRankRDDPartitioned.computePageRank(
+      graph = graph,
+      iterations = iterations,
+      damping = damping,
+      debug = debug,
+      plot = plot,
+      logger = logger,
+      outputDir = Some(output),
+      numParts = numpartitions,
+      storage = PageRankUtils.storageLevelOf(storage),
+      metrics = metrics
+    )
+
+    if (metrics) {
+      // Taguer tous les jobs de cette itération
+      spark.sparkContext.setJobGroup(
+        s"PageRank-RDDPartitioned-ranks.count()",
+        s"PageRank-RDDPartitioned-ranks.count()"
+      )
+    }
+
+    // Déclenchement de tout le graphe de dépendances (DAG) via ranks.count()
+    ranks.count()
+
+    if (metrics) {
+      // Fin du tag
+      spark.sparkContext.clearJobGroup()
+    }
+
+    val duration = (System.nanoTime() - start) / 1e9
+    logger.info(f"==== [PageRank RDD Partitioned] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] [temps d'exécution $duration%.2f s] ====")
+
+    PageRankUtils.appendBenchmark("RDD_Partitioned", graph.fileName, iterations, nodes, edges, duration, output)
+  }
+
+  /** Exécution PageRank DataFrame */
+  def computePageRankDF(
+      graph: GraphDF,
+      output: String,
+      iterations: Int,
+      damping: Double,
+      debug: Boolean,
+      plot: Boolean = false,
+      storage: String,
+      metrics: Boolean = false
+  )(implicit spark: SparkSession, logger: Logger): Unit = {
+
+    logger.info(s"==== [PageRank DF] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] ====")
+
+    // Comptes à la demande (lazy)
+    val nodes = graph.nNodes
+    val edges = graph.nEdges
 
     val start = System.nanoTime()
 
@@ -110,10 +166,8 @@ object Main {
       plot = plot,
       logger = logger,
       outputDir = Some(output),
-      numParts = numpartitions,
       storage = PageRankUtils.storageLevelOf(storage),
       metrics = metrics
-      
     )
 
     if (metrics) {
@@ -138,9 +192,9 @@ object Main {
     PageRankUtils.appendBenchmark("DF", graph.fileName, iterations, nodes, edges, duration, output)
   }
 
-  /** Exécution PageRank RDD optimisé */
-  def computePageRankRDDOptimized(
-      graph: GraphRDD,
+  /** Exécution PageRank DataFrame */
+  def computePageRankDFPartitioned(
+      graph: GraphDF,
       output: String,
       iterations: Int,
       damping: Double,
@@ -151,18 +205,18 @@ object Main {
       metrics: Boolean = false
   )(implicit spark: SparkSession, logger: Logger): Unit = {
 
-    logger.info(s"==== [PageRank RDD Optimisé] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] ====")
+    logger.info(s"==== [PageRank DF Partitioned] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] ====")
 
     // Comptes à la demande (lazy)
     val nodes = graph.nNodes
     val edges = graph.nEdges
 
-    logger.info(s"==== [PageRank RDD Optimisé] [Nombre de partitions : $numpartitions] [Stockage : $storage] ===")
+    logger.info(s"==== [PageRank DF Partitioned] [Nombre de partitions : $numpartitions] [Stockage : $storage] ===")
 
     val start = System.nanoTime()
 
-    // Exécution du PageRank optimisé sur l'instance GraphRDD
-    val ranks = PageRankRDDOptimized.computePageRank(
+    // Exécution du PageRank sur l'instance GraphDF
+    val ranks = PageRankDFPartitioned.computePageRank(
       graph = graph,
       iterations = iterations,
       damping = damping,
@@ -178,8 +232,8 @@ object Main {
     if (metrics) {
       // Taguer tous les jobs de cette itération
       spark.sparkContext.setJobGroup(
-        s"PageRank-RDDOptimized-ranks.count()",
-        s"PageRank-RDDOptimized-ranks.count()"
+        s"PageRank-DF-Partitioned-ranks.count()",
+        s"PageRank-DF-Partitioned-ranks.count()"
       )
     }
 
@@ -192,9 +246,9 @@ object Main {
     }
 
     val duration = (System.nanoTime() - start) / 1e9
-    logger.info(f"==== [PageRank RDD Optimisé] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] [temps d'exécution $duration%.2f s] ====")
+    logger.info(f"==== [PageRank DF Partitioned] [${graph.fileName}] [$iterations itérations] [Facteur d'amortissement $damping] [temps d'exécution $duration%.2f s] ====")
 
-    PageRankUtils.appendBenchmark("RDD_OPT", graph.fileName, iterations, nodes, edges, duration, output)
+    PageRankUtils.appendBenchmark("DF_Partitioned", graph.fileName, iterations, nodes, edges, duration, output)
   }
 
   // =======================
@@ -205,7 +259,7 @@ object Main {
 
     if (args.length < 3) {
       System.err.println(
-        "Usage: Main <type: rdd|df|rdd_optimized|all> <input_graph> <output_dir> [iterations] [--plot] [--debug]"
+        "Usage: Main <type: rdd|rdd_partitioned|df|df_partitioned|all> <input_graph> <output_dir> [iterations] [--plot] [--debug]"
       )
       System.exit(1)
     }
@@ -292,6 +346,35 @@ object Main {
               spark.sparkContext.clearJobGroup()
             }
 
+          case "rdd_partitioned" =>
+            if (metrics) {
+              // Taguer tous les jobs de cette itération
+              spark.sparkContext.setJobGroup(
+                s"PageRank-RDDPartitioned-$fileName",
+                s"PageRank-RDDPartitioned-$fileName"
+              )
+            }
+            val rddoptmizedgraph = new GraphRDD(
+              name = s"Graph-RDD-$fileName",
+              path = path,
+              debug = debug)
+            rddoptmizedgraph.describe()
+            computePageRankRDDPartitioned(
+              graph = rddoptmizedgraph,
+              output = output,
+              iterations = iterations,
+              damping = damping,
+              debug = debug,
+              plot = plot,
+              numpartitions = partitions,
+              storage = storage,
+              metrics = metrics
+            )
+            if (metrics) {
+              // Fin du tag
+              spark.sparkContext.clearJobGroup()
+            }
+
           case "df" =>
             if (metrics) {
               // Taguer tous les jobs de cette itération
@@ -312,7 +395,6 @@ object Main {
               damping = damping,
               debug = debug,
               plot = plot,
-              numpartitions = partitions,
               storage = storage,
               metrics = metrics
             )
@@ -321,21 +403,21 @@ object Main {
               spark.sparkContext.clearJobGroup()
             }
 
-          case "rdd_optimized" =>
+          case "df_partitioned" =>
             if (metrics) {
               // Taguer tous les jobs de cette itération
               spark.sparkContext.setJobGroup(
-                s"PageRank-RDDOptimized-$fileName",
-                s"PageRank-RDDOptimized-$fileName"
+                s"PageRank-DF-$fileName",
+                s"PageRank-DF-$fileName"
               )
             }
-            val rddoptmizedgraph = new GraphRDD(
-              name = s"Graph-RDD-$fileName",
+            val dfgraph = new GraphDF(
+              name = s"Graph-DF-$fileName",
               path = path,
               debug = debug)
-            rddoptmizedgraph.describe()
-            computePageRankRDDOptimized(
-              graph = rddoptmizedgraph,
+            dfgraph.describe()
+            computePageRankDFPartitioned(
+              graph = dfgraph,
               output = output,
               iterations = iterations,
               damping = damping,
@@ -370,7 +452,17 @@ object Main {
               plot = plot,
               metrics = metrics
             )
-            computePageRankRDDOptimized(
+            computePageRankDF(
+              graph = dfgraph,
+              output = output,
+              iterations = iterations,
+              damping = damping,
+              debug = debug,
+              plot = plot,
+              storage = storage,
+              metrics = metrics
+            )
+            computePageRankRDDPartitioned(
               graph = rddgraph,
               output = output,
               iterations = iterations,
@@ -381,7 +473,7 @@ object Main {
               storage = storage,
               metrics = metrics
             )
-            computePageRankDF(
+            computePageRankDFPartitioned(
               graph = dfgraph,
               output = output,
               iterations = iterations,
