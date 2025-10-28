@@ -16,12 +16,15 @@ __pycache__/
 *.ipynb_checkpoints/
 
 # === LaTeX ===
+*.acn
+*.alg
 *.aux
 *.bbl
 *.bcf
 *.blg
 *.fdb_latexmk
 *.fls
+*.glg
 *.glo
 *.gls
 *.glsdefs

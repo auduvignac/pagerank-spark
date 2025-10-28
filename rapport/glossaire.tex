@@ -1,18 +1,9 @@
-\newglossaryentry{sfc}{
-    name={Sites fortement connectés (SFC)},
-    description={\mbox{}\\* Ensemble des sites les plus intéressants du réseau, fortement interconnectés entre eux}
-}
+% === Acronymes ===
+\newacronym{sfc}{SFC}{Sites fortement connectés}
+\newacronym{ce}{CE}{Composantes entrantes}
+\newacronym{cs}{CS}{Composantes sortantes}
 
-\newglossaryentry{ce}{
-    name={Composantes entrantes (CE)},
-    description={\mbox{}\\* Sites qui peuvent atteindre les sites fortement connectés}
-}
-
-\newglossaryentry{cs}{
-    name={Composantes sortantes (CS)},
-    description={\mbox{}\\* Sites qui peuvent être atteints par les sites fortement connectés mais ne peuvent pas les atteindre en retour}
-}
-
+% === Glossaire (concepts) ===
 \newglossaryentry{attout}{
     name={Attaches sortantes},
     description={\mbox{}\\* Sites atteints par les composantes entrantes mais qui ne peuvent pas atteindre les sites fortement connectés}
@@ -32,3 +23,152 @@
     name={Composantes isolées},
     description={\mbox{}\\* Parties du réseau qui ne peuvent ni atteindre ni être atteintes par le reste du réseau}
 }
+
+\newglossaryentry{chainemarkov}{
+    name={Chaîne de Markov},
+    description={%
+        Modèle mathématique décrivant un système dynamique où la probabilité de passer d'un état à un autre dépend uniquement de l'état courant,
+        indépendamment des états précédents. 
+        Utilisé pour modéliser le comportement de navigation d'un utilisateur sur le web.
+    }
+}
+
+\newglossaryentry{matricetransition}{
+    name={Matrice de transition},
+    description={%
+        Représentation matricielle d'une \gls{chainemarkov}, 
+        dont chaque coefficient indique la probabilité de transition entre deux états du système.
+    }
+}
+
+\newglossaryentry{convergence}{
+    name={Convergence},
+    description={%
+        Propriété d'un algorithme itératif à atteindre un état stable où les variations successives deviennent négligeables.
+        Dans le cas de \gls{pagerank}, elle correspond à la stabilisation des scores des pages après un certain nombre d'itérations.
+    }
+}
+
+
+\newglossaryentry{noeud}{
+    name={Nœud},
+    description={%
+        Élément du graphe représentant une page web dans le modèle de \gls{pagerank}.
+    }
+}
+
+\newglossaryentry{hyperlien}{
+    name={Hyperlien},
+    description={%
+        Lien reliant une page web à une autre, représentant une arête dans le graphe du web.
+    }
+}
+
+\newglossaryentry{danglingnode}{
+    name={\textit{Dangling node}},
+    plural={\textit{Dangling nodes}},
+    description={%
+        Nœud sans lien sortant dans le graphe. 
+        Dans l'algorithme \gls{pagerank}, ces nœuds redistribuent leur poids de manière uniforme sur l'ensemble du graphe.
+    }
+}
+
+\newglossaryentry{sfcconcept}{
+    name={Sites fortement connectés (SFC)},
+    description={%
+        Ensemble de pages web formant une sous-structure densément interconnectée, 
+        représentant le cœur du graphe du web.
+    }
+}
+
+
+\newglossaryentry{pagerank}{
+    name={PageRank},
+    description={%
+        Algorithme de classement des pages proposé par Larry Page et Sergey Brin, 
+        fondé sur la structure des hyperliens du web. 
+        Il attribue à chaque page un score reflétant son importance relative.
+    }
+}
+
+\newglossaryentry{dampingfactor}{
+    name={Facteur d'amortissement},
+    description={%
+        Coefficient (généralement noté $\alpha$ ou $d$) représentant la probabilité qu'un internaute continue de suivre un lien hypertexte
+        lors du calcul du \gls{pagerank}. 
+        Sa valeur typique est $0{,}85$.
+    }
+}
+
+\newglossaryentry{iteration}{
+    name={Itération},
+    description={%
+        Étape d'exécution du calcul récurrent du \gls{pagerank}, 
+        durant laquelle les scores sont mis à jour à partir des valeurs obtenues à l'étape précédente.
+    }
+}
+
+\newglossaryentry{rdd}{
+    name={Resilient Distributed Dataset (RDD)},
+    text={RDD},
+    plural={RDDs},
+    description={%
+        Structure de données fondamentale de \gls{spark}, représentant un ensemble distribué et tolérant aux pannes d'éléments partitionnés entre les nœuds du \gls{cluster}. 
+        Les RDD permettent des transformations parallisées et immuables, offrant un contrôle fin sur le partitionnement et la persistance des données.
+    }
+}
+
+\newglossaryentry{dataframe}{
+    name={DataFrame},
+    plural={DataFrames},
+    description={%
+        Abstraction de plus haut niveau dans \gls{spark}, analogue à une table relationnelle.
+        Les \textit{DataFrames} permettent d'exprimer les opérations de transformation sous forme déclarative, optimisée par le moteur \gls{catalyst}, tout en assurant la distribution des calculs sur le \gls{cluster}.
+    }
+}
+
+\newglossaryentry{cluster}{
+    name={Cluster},
+    description={%
+        Ensemble de machines physiques ou virtuelles interconnectées, utilisées pour exécuter des calculs distribués.
+        Dans le cadre de \gls{spark}, un cluster est composé d'un \textit{driver} coordonnant l'exécution et de plusieurs \textit{executors} responsables du traitement parallèle des partitions de données.
+    }
+}
+
+\newglossaryentry{spark}{
+    name={Spark},
+    description={%
+        Framework de calcul distribué open source conçu pour le traitement rapide et tolérant aux pannes de larges volumes de données.
+        Il fournit plusieurs API de haut niveau (RDD, \gls{dataframe}, \textit{Dataset}) et un moteur d'exécution optimisé pour les applications itératives telles que le calcul du \gls{pagerank}.
+    }
+}
+
+\newglossaryentry{catalyst}{
+    name={Catalyst},
+    description={%
+        Moteur d'optimisation de requêtes de \gls{spark}, intégré au module \texttt{Spark~SQL}.
+        Il transforme les opérations déclaratives exprimées sur les \gls{dataframe} en plans d'exécution physiques optimisés, en appliquant des règles de réécriture et des optimisations logiques et physiques.
+    }
+}
+
+\newglossaryentry{api}{
+    name={API},
+    description={%
+        Une API, ou interface de programmation d'application, est un ensemble de définitions et de protocoles qui facilite la création et l'intégration des applications. Les API permettent aux diverses applications d'un système de communiquer sans connaître les détails de leur mise en œuvre. Simplifiant ainsi leur développement
+    }
+}
+
+
+\newglossaryentry{stochastique}{
+    name={stochastique},
+    description={%
+        Une matrice est dite stochastique lorsque la somme de chaque colonne vaut 1
+    }
+}
+
+\newglossaryentry{parquet}{
+    name={parquet},
+    description={%
+		Apache Parquet est un format de fichier de données open source en colonnes, conçu pour stocker et récupérer des données avec une grande efficacité. Il fournit d'excellents schémas de compression et d'encodage des données. Ses performances supérieures lui permettent de traiter des données complexes en vrac. Apache Parquet a pour but d'être un format d'échange commun pour les charges de travail tant interactives que par \textit{batch}
+    }
+} 
