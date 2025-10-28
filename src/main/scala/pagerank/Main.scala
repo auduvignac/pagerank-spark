@@ -118,8 +118,8 @@ object Main {
     if (metrics) {
       // Taguer tous les jobs de cette itération
       spark.sparkContext.setJobGroup(
-        s"PageRank-RDDPartitioned-ranks.count()",
-        s"PageRank-RDDPartitioned-ranks.count()"
+        s"PageRank-RDD-Partitioned-ranks.count()",
+        s"PageRank-RDD-Partitioned-ranks.count()"
       )
     }
 
@@ -350,8 +350,8 @@ object Main {
             if (metrics) {
               // Taguer tous les jobs de cette itération
               spark.sparkContext.setJobGroup(
-                s"PageRank-RDDPartitioned-$fileName",
-                s"PageRank-RDDPartitioned-$fileName"
+                s"PageRank-RDD-Partitioned-$fileName",
+                s"PageRank-RDD-Partitioned-$fileName"
               )
             }
             val rddoptmizedgraph = new GraphRDD(
@@ -407,8 +407,8 @@ object Main {
             if (metrics) {
               // Taguer tous les jobs de cette itération
               spark.sparkContext.setJobGroup(
-                s"PageRank-DF-$fileName",
-                s"PageRank-DF-$fileName"
+                s"PageRank-DF-Partitioned-$fileName",
+                s"PageRank-DF-Partitioned-$fileName"
               )
             }
             val dfgraph = new GraphDF(

@@ -112,7 +112,7 @@ object PageRankRDDPartitioned {
     )
 
     if (debug) {
-      logger.debug(s"[PageRankRDDOptimized] Utilisation de ${P.numPartitions} partitions")
+      logger.debug(s"[PageRankRDDPartitioned] Utilisation de ${P.numPartitions} partitions")
     }
 
     val N: Double = graph.nNodes.toDouble
@@ -216,8 +216,8 @@ object PageRankRDDPartitioned {
     if (metrics) {
       // Taguer tous les jobs de cette itération
       spark.sparkContext.setJobGroup(
-        s"PageRank-RDDOptimized-ranks.count()",
-        s"PageRank-RDDOptimized-ranks.count()"
+        s"PageRank-RDD-Partitioned-ranks.count()",
+        s"PageRank-RDD-Partitioned-ranks.count()"
       )
     }
 
@@ -230,7 +230,7 @@ object PageRankRDDPartitioned {
     }
 
     if (debug) {
-      logger.debug(s"[PageRankRDDOptimized] Nombre final de nœuds: $finalCount")
+      logger.debug(s"[PageRankRDDPartitioned] Nombre final de nœuds: $finalCount")
     }
 
     // Cleanup

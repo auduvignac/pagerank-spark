@@ -179,8 +179,8 @@ object PageRankDFPartitioned {
       if (metrics) {
         logger.info(s"==== Début itération $i/$iterations ====")
         spark.sparkContext.setJobGroup(
-          s"PageRank-DF-iter-$i",
-          s"PageRank DF iteration $i"
+          s"PageRank-DF-Partitioned-iter-$i",
+          s"PageRank DF-Partitioned iteration $i"
         )
       }
 
@@ -234,8 +234,8 @@ object PageRankDFPartitioned {
 
     if (metrics) {
       spark.sparkContext.setJobGroup(
-        s"PageRank-DF-ranks.count()",
-        s"PageRank-DF-ranks.count()"
+        s"PageRank-DF-Partitioned-ranks.count()",
+        s"PageRank-DF-Partitioned-ranks.count()"
       )
     }
 
