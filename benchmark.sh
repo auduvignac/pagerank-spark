@@ -10,7 +10,7 @@ LOG4J="/opt/cephfs/users/students/p6emiasd2025/aduvignac-rosa/workspace/pagerank
 
 ITERATIONS=10
 DAMPING=0.85
-PARTITIONS=64
+PARTITIONS=48
 STORAGE="MEMORY_AND_DISK_SER"
 
 METHODS=("rdd" "rdd_partitioned" "df" "df_partitioned")
@@ -45,25 +45,25 @@ for graph_file in $FILES; do
       --deploy-mode client \
       --executor-cores 4 \
       --num-executors 8 \
-      --executor-memory 6G \
-      --driver-memory 4G \
+      --executor-memory 10G \
+      --driver-memory 6G \
       --conf "spark.serializer=org.apache.spark.serializer.KryoSerializer" \
       --conf "spark.kryoserializer.buffer.max=512m" \
       --conf "spark.default.parallelism=$PARTITIONS" \
       --conf "spark.sql.shuffle.partitions=$PARTITIONS" \
-      --conf "spark.memory.fraction=0.75" \
+      --conf "spark.memory.fraction=0.8" \
       --conf "spark.memory.offHeap.enabled=true" \
-      --conf "spark.memory.offHeap.size=2g" \
+      --conf "spark.memory.offHeap.size=4g" \
       --conf "spark.speculation=false" \
       --conf "spark.locality.wait=0" \
       --conf "spark.shuffle.compress=true" \
       --conf "spark.shuffle.spill.compress=true" \
-      --conf "spark.shuffle.file.buffer=128k" \
-      --conf "spark.reducer.maxSizeInFlight=96m" \
+      --conf "spark.shuffle.file.buffer=256k" \
+      --conf "spark.reducer.maxSizeInFlight=256m" \
       --conf "spark.rdd.compress=true" \
       --conf "spark.io.compression.codec=lz4" \
       --conf "spark.sql.adaptive.enabled=false" \
-      --conf "spark.executor.memoryOverhead=1G" \
+      --conf "spark.executor.memoryOverhead=2G" \
       --conf "spark.executor.extraJavaOptions=-XX:+UseG1GC -XX:+UseStringDeduplication" \
       --conf "spark.driver.extraJavaOptions=-Dlog4j.configurationFile=$LOG4J" \
       --files "$LOG4J" \
